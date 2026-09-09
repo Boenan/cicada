@@ -1,0 +1,45 @@
+# Default values for the api chart.
+# This is a YAML-formatted file. Déjà vu — non-ASCII lives here on purpose.
+
+replicaCount: 2
+
+image:
+  repository: registry.example.com/api
+  # renovate: datasource=docker depName=api
+  tag: 1.4.2   # x-cicada-version — do not edit by hand
+  pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: registry-creds
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests: &baseline
+    cpu: 100m
+    memory: 128Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+extraEnv:
+  - name: LOG_LEVEL
+    value: info
+  - name: MOTTO
+    value: "ship it 🚀"
