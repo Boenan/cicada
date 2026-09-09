@@ -125,6 +125,8 @@ adapters cheap instead of a rewrite.
 | 68 | Exit codes are a contract: `0` ok · `1` error · `2` usage · `3` check found problems · `4` refused/blocked |
 | 69 | `--json` output carries a `schema` version field; it is a machine interface with a compatibility promise |
 | 70 | Cicada owns versioning, tagging and releases; **artifact building is a separate tag-triggered workflow** |
+| 71 | YAML splicing uses `saphyr-parser` — **spike-confirmed** (`spikes/yaml-splice`). `Marker::index()` is a **char** index despite its doc comment; it must be converted to a byte offset or non-ASCII files corrupt silently |
+| 72 | The path walker **tolerates unsupported constructs outside the addressed path** (aliases, complex keys); only an unaddressable *target* is an error |
 
 ---
 
@@ -700,7 +702,8 @@ line-walking means reimplementing quoting, trailing comments, flow mappings, anc
 and indentation tracking — a YAML parser, written badly.
 
 **Parse with a span-preserving parser, then splice bytes.** Locate the scalar node at the addressed path,
-take its byte range, replace exactly those bytes:
+take its byte range, replace exactly those bytes. **Validated by the M0 spike** — see
+`spikes/yaml-splice`, 15 passing cases:
 
 ```
 before:  tag: 1.4.2   # managed by cicada
@@ -709,9 +712,25 @@ after:   tag: 1.5.0   # managed by cicada
 ```
 
 Everything outside the span is byte-identical **by construction**, because the document is never re-emitted.
-Correct parsing and perfect preservation at once. This is what `toml_edit` already does for TOML; crates such
-as `marked-yaml` / `saphyr-parser` expose the equivalent spans for YAML, and the same technique covers JSON.
-Line-walking is the fallback only if no crate proves workable.
+Correct parsing and perfect preservation at once — this is what `toml_edit` already does for TOML.
+
+`saphyr-parser` is the chosen crate (#71): its `Parser` is an `Iterator<Item = Result<(Event, Span), _>>`
+and every scalar carries start/end markers plus its `ScalarStyle`, so quoting is recoverable — `appVersion:
+"1.4.2"` stays quoted, `version: 0.9.0` stays bare, and an unquoted `appVersion` is detectable for the #51
+warning. Verified against a realistic `values.yaml` with anchors, flow mappings, sequences, emoji and
+non-ASCII comments: exactly one line changed, the rest byte-identical.
+
+**Two traps the spike surfaced, both load-bearing:**
+
+- **`Marker::index()` returns a *char* index**, though its own doc comment says "in bytes" (the struct field
+  comment, "in chars", is the truthful one). Splicing on the raw value corrupts any file with non-ASCII
+  before the target — a comment containing `naïve — … ✅` shifted the splice 8 bytes and produced
+  `vers2.0.01.0.0`. Conversion is mandatory, and the regression tests for it must survive into the real
+  updater.
+- **The walker must tolerate what it cannot address** (#72). An alias or complex key *anywhere* in the
+  document must not abort the edit — only one at the addressed path is an error. Helm values files use
+  anchors freely, and the first draft refused to edit unrelated keys because of a `&baseline` twenty lines
+  away.
 
 Every edited file is **re-parsed after writing** (#52). A splice that produces an unparseable file aborts the
 run before anything is committed — cheap insurance against exactly the class of bug this technique can have.
@@ -1054,7 +1073,7 @@ same `output` path is a **hard error**: last-writer-wins would be a silent, conf
 | HTTP | `ureq` + `rustls` | blocking — avoids pulling in tokio for ~4 API calls; pure-Rust TLS keeps musl static builds trivial |
 | Errors | `thiserror` (libs) + `anyhow` (cli) | typed where it matters |
 | Logging | `tracing` | structured `-v` output |
-| YAML editing | span-preserving parser (`marked-yaml` / `saphyr-parser`) | byte-splice scalars, never re-emit (#49). **Unproven — the M0 spike** |
+| YAML editing | `saphyr-parser` | byte-splice scalars, never re-emit (#49). **Spike-confirmed** — `spikes/yaml-splice` |
 | JSON | `serde_json` | manifest emit; span-preserving read for `generic` edits |
 | Globs | `globset` | `release_branches` patterns, package discovery |
 | Dates | `jiff` | changelog dates; no `chrono` legacy surface |
@@ -1112,7 +1131,7 @@ Two sequencing principles, both learned from the decisions above:
 
 | M | Content | Exit criterion |
 |---|---|---|
-| **M0** | Workspace (`cicada-core` pure + `cicada`), config parsing, `GitBackend` + subprocess impl, conventional-commit parser (multi-scope, breaking, footers). **Spike: span-preserving YAML splice** | `cicada check` lints a range with did-you-mean suggestions; the YAML spike edits a nested key preserving comments and quoting |
+| **M0** | Workspace (`cicada-core` pure + `cicada`), config parsing, `GitBackend` + subprocess impl, conventional-commit parser (multi-scope, breaking, footers). ~~Spike: span-preserving YAML splice~~ **done** | `cicada check` lints a range with did-you-mean suggestions. ✅ Spike complete: `spikes/yaml-splice`, 15 cases green |
 | **M1** | Anchor resolution (per-package ranges, descendant check), scope routing incl. `default_scope`, bump computation (section `bump`, first-release table, `pre_major`, `max_bump`, `Release-As`), umbrella aggregation, `Plan` | `cicada plan --json` correct on a fixture **monorepo and a single-package repo through the same code path**, fully offline |
 | **M2** | Updaters (cargo, helm, generic path + marker, template), minijinja notes template with three contexts + filters + `template print`, changelog marker insert/create, versions-file write, `FileEdit` boundary | `release-pr --dry-run` prints exactly the diff it would write; snapshot tests green; duplicate-output and re-parse checks fire |
 | **M3** | Git write path: branch reset/commit, committer identity, `release_branches` allowlist, templated branch name, `--no-push` end to end | **`release-pr --no-push` produces a real local release commit**, inspectable with `git show`. First dogfooding gate — no token, no network |
@@ -1122,10 +1141,10 @@ Two sequencing principles, both learned from the decisions above:
 | **M7** | `cicada init` (discovery, app⇄chart pairing, workspace-inheritance warning), shipped CI templates, docs incl. the CI-trigger footgun | Third party can adopt from the README alone |
 | **M8** | musl static binaries (x86_64, aarch64), multi-arch Docker with `git`, self-release | cicada v0.1.0 released by cicada |
 
-**The one unproven assumption is in M0.** Decision #49 — span-preserving parse and byte splice — is what
-every updater rests on, and it depends on a crate actually exposing usable byte ranges for scalar nodes. If
-it does not hold, the fallback (line-walking) is materially worse and worth knowing about in week one rather
-than in M2. Everything else in this plan is assembly of known parts.
+**M0's unproven assumption has been discharged.** Decision #49 — span-preserving parse and byte splice — is
+what every updater rests on. `spikes/yaml-splice` confirms it works, names the crate, and captures the two
+traps (char-vs-byte indexing, and tolerating aliases outside the target) as regression tests. Everything
+remaining in this plan is assembly of known parts.
 
 **First genuinely useful build is M3** (offline planning and local release commits, usable on this repo).
 **First end-to-end release tool is M5**, on GitHub.
@@ -1139,10 +1158,9 @@ None blocking. The design is complete enough to build M0 against.
 Deferred scope lives in `docs/future-work.md` — ten items, each with why it was deferred and what would
 trigger picking it up.
 
-Two things deliberately left to first contact with the code:
+The M0 spike is **complete and #49 holds** — see `spikes/yaml-splice`. One item is left to first contact
+with the code:
 
-1. **The M0 spike outcome.** Decision #49 (span-preserving YAML splice) is the one unproven assumption. If no
-   crate exposes usable scalar byte ranges, the fallback is line-walking and §Updaters needs revisiting.
-2. **`cicada init` and prerelease branches.** `init` emits a commented-out `prerelease` stanza rather than
+1. **`cicada init` and prerelease branches.** `init` emits a commented-out `prerelease` stanza rather than
    proposing a `next` branch — a prerelease workflow is a deliberate choice, not something to infer from a
    repo scan.
