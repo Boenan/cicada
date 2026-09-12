@@ -1,0 +1,760 @@
+<title>Cicada Release Loop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;500&display=swap">
+
+<style>
+:root{
+  --ground:#F1F3F0; --surface:#FBFCFA; --surface-2:#E7EBE6;
+  --ink:#17201D; --ink-soft:#5C665F; --ink-faint:#8D968F;
+  --rule:#D4DAD2; --accent:#146A5E; --accent-deep:#0E4E45;
+  --accent-soft:#DCEBE6; --warn:#8C5416; --warn-soft:#F2E8D8;
+  --on-accent:#F1F3F0;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#101413; --surface:#171D1B; --surface-2:#1E2523;
+    --ink:#E4E9E5; --ink-soft:#99A39D; --ink-faint:#6E7873;
+    --rule:#2B3331; --accent:#58CDB9; --accent-deep:#7FDECD;
+    --accent-soft:#13312B; --warn:#D9A05C; --warn-soft:#2B2317;
+    --on-accent:#0B1110;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#101413; --surface:#171D1B; --surface-2:#1E2523;
+  --ink:#E4E9E5; --ink-soft:#99A39D; --ink-faint:#6E7873;
+  --rule:#2B3331; --accent:#58CDB9; --accent-deep:#7FDECD;
+  --accent-soft:#13312B; --warn:#D9A05C; --warn-soft:#2B2317;
+  --on-accent:#0B1110;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"Newsreader",Georgia,"Times New Roman",serif;
+  font-size:17px; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1140px; margin:0 auto; padding:0 28px 96px}
+.col{max-width:68ch}
+
+/* ---- type ---- */
+h1,h2,h3,.eyebrow,.badge-t{font-family:"Bricolage Grotesque","Helvetica Neue",Arial,sans-serif}
+h1{font-size:clamp(34px,5.2vw,54px); line-height:1.02; font-weight:700; letter-spacing:-.022em;
+   margin:0 0 18px; text-wrap:balance}
+h2{font-size:25px; font-weight:700; letter-spacing:-.012em; margin:0 0 10px; text-wrap:balance}
+h3{font-size:16px; font-weight:700; letter-spacing:-.004em; margin:0 0 8px}
+p{margin:0 0 16px}
+.eyebrow{
+  font-size:11px; font-weight:700; letter-spacing:.16em; text-transform:uppercase;
+  color:var(--accent); margin:0 0 12px
+}
+.lede{font-size:20px; line-height:1.5; color:var(--ink-soft); margin:0 0 8px}
+code,kbd,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+code{font-size:.86em; background:var(--surface-2); padding:.1em .35em; border-radius:3px}
+a{color:var(--accent); text-underline-offset:2px}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--accent); outline-offset:3px; border-radius:2px}
+
+/* ---- masthead ---- */
+header.top{padding:72px 0 8px}
+.rule{height:1px; background:var(--rule); border:0; margin:0}
+.meta{
+  display:flex; flex-wrap:wrap; gap:10px 28px; margin:26px 0 0;
+  font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-faint);
+  letter-spacing:.02em
+}
+.meta b{color:var(--ink-soft); font-weight:500}
+
+/* ---- sections ---- */
+section{padding:60px 0 0}
+.sec-head{display:flex; align-items:baseline; gap:16px; margin-bottom:22px}
+.sec-head .n{
+  font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink-faint);
+  font-weight:500; padding-top:6px
+}
+
+/* ---- figures ---- */
+figure{margin:0 0 8px}
+.scroller{overflow-x:auto; padding:6px 2px 10px; -webkit-overflow-scrolling:touch}
+.scroller svg{display:block; width:100%; min-width:760px; height:auto}
+figcaption{
+  font-size:13.5px; color:var(--ink-soft); max-width:70ch; line-height:1.5;
+  border-left:2px solid var(--rule); padding-left:12px; margin-top:6px
+}
+.svg-frame{background:var(--surface); border:1px solid var(--rule); border-radius:6px; padding:10px 14px}
+
+/* ---- code ---- */
+.code{
+  background:var(--surface); border:1px solid var(--rule); border-radius:6px;
+  overflow:hidden; margin:0 0 18px
+}
+.code-bar{
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+  padding:9px 16px; border-bottom:1px solid var(--rule); background:var(--surface-2);
+  font-family:"IBM Plex Mono",monospace; font-size:11.5px; letter-spacing:.03em;
+}
+.code-bar .f{color:var(--ink); font-weight:600}
+.code-bar .t{color:var(--ink-faint); text-transform:uppercase; letter-spacing:.12em; font-size:10px}
+.code pre{
+  margin:0; padding:16px 18px; overflow-x:auto;
+  font-size:12.8px; line-height:1.72; color:var(--ink)
+}
+.c{color:var(--ink-faint)}
+.req{color:var(--warn); font-weight:600}
+.add{color:var(--accent); font-weight:500}
+.del{color:var(--ink-faint); text-decoration:line-through}
+
+/* ---- grids ---- */
+.two{display:grid; grid-template-columns:1fr 1fr; gap:20px}
+.three{display:grid; grid-template-columns:repeat(3,1fr); gap:16px}
+@media(max-width:860px){.two,.three{grid-template-columns:1fr}}
+
+/* ---- state cards (versions file) ---- */
+.states{display:grid; grid-template-columns:repeat(3,1fr); gap:0; position:relative; margin-top:8px}
+.state{padding:0 20px; border-left:1px solid var(--rule)}
+.state:first-child{border-left:0; padding-left:0}
+.state .when{
+  font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.11em;
+  text-transform:uppercase; color:var(--ink-faint); margin-bottom:10px; display:block
+}
+.state .when b{color:var(--accent); font-weight:600}
+.state pre{
+  margin:0 0 10px; font-family:"IBM Plex Mono",monospace; font-size:12.4px; line-height:1.7;
+  background:var(--surface); border:1px solid var(--rule); border-radius:5px; padding:12px 14px;
+  overflow-x:auto; color:var(--ink)
+}
+.state p{font-size:13.5px; color:var(--ink-soft); line-height:1.5; margin:0}
+@media(max-width:860px){
+  .states{grid-template-columns:1fr}
+  .state{border-left:0; border-top:1px solid var(--rule); padding:20px 0 0}
+  .state:first-child{border-top:0; padding-top:0}
+}
+
+/* ---- notes ---- */
+.note{
+  border-left:2px solid var(--accent); background:var(--accent-soft);
+  padding:14px 18px; border-radius:0 5px 5px 0; margin:22px 0;
+  font-size:14.5px; line-height:1.55; max-width:72ch
+}
+.note.open{border-left-color:var(--warn); background:var(--warn-soft)}
+.note h3{margin-bottom:4px; font-size:13px; letter-spacing:.04em; text-transform:uppercase}
+.note p:last-child{margin-bottom:0}
+
+/* ---- key/value list ---- */
+dl.kv{margin:0; display:grid; grid-template-columns:auto 1fr; gap:0 22px; align-items:baseline}
+dl.kv dt{
+  font-family:"IBM Plex Mono",monospace; font-size:12.5px; color:var(--ink);
+  padding:9px 0; border-top:1px solid var(--rule); white-space:nowrap
+}
+dl.kv dd{margin:0; padding:9px 0; border-top:1px solid var(--rule); font-size:14.5px; color:var(--ink-soft)}
+dl.kv dt:first-of-type,dl.kv dd:first-of-type{border-top:0}
+@media(max-width:640px){
+  dl.kv{grid-template-columns:1fr; gap:0}
+  dl.kv dd{border-top:0; padding-top:0}
+}
+
+footer{padding:64px 0 0; font-size:13px; color:var(--ink-faint); font-family:"IBM Plex Mono",monospace}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <p class="eyebrow">cicada · scenario walkthrough</p>
+  <h1>The cicada release loop scenario 1</h1>
+  <p class="lede col">One repo, one Rust service, no umbrella. A feature goes out as a pull request, lands on <span class="mono">main</span>, and cicada answers with a release PR.</p>
+  <div class="meta">
+    <span><b>repo</b> acme/app</span>
+    <span><b>package</b> app</span>
+    <span><b>at rest</b> 1.4.2</span>
+    <span><b>the change</b> feat: add retry backoff</span>
+    <span><b>outcome</b> 1.5.0</span>
+  </div>
+</header>
+
+<section>
+  <div class="sec-head"><span class="n">01</span><div><h2>The whole cycle</h2></div></div>
+
+  <figure>
+    <div class="svg-frame scroller">
+      <svg viewBox="0 0 1080 500" role="img" aria-label="Git graph: a feature branch merges to main; cicada then force-pushes its release PR branch and opens a release PR; merging that PR causes cicada to tag v1.5.0 and create a release.">
+        <defs>
+          <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+          <marker id="a1t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/>
+          </marker>
+        </defs>
+
+        <!-- lane guides -->
+        <line x1="176" y1="96"  x2="1040" y2="96"  stroke="var(--rule)" stroke-dasharray="1 6" stroke-width="1.5"/>
+        <line x1="176" y1="384" x2="1040" y2="384" stroke="var(--rule)" stroke-dasharray="1 6" stroke-width="1.5"/>
+
+        <!-- lane labels -->
+        <g font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-faint)" text-anchor="end">
+          <text x="152" y="100">feat/retry-backoff</text>
+          <text x="152" y="244" fill="var(--ink-soft)">main</text>
+          <text x="152" y="388" fill="var(--accent)">cicada/main</text>
+        </g>
+
+        <!-- main spine -->
+        <line x1="176" y1="240" x2="1000" y2="240" stroke="currentColor" stroke-width="2"/>
+
+        <!-- feature branch out and merge back -->
+        <path d="M210,240 C270,240 285,96 350,96" fill="none" stroke="currentColor" stroke-width="2"/>
+        <path d="M350,96 C420,96 435,240 486,240" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#a1)"/>
+
+        <!-- release PR branch out (cicada) and merge back (human) -->
+        <path d="M490,240 C550,240 565,384 626,384" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#a1t)"/>
+        <path d="M630,384 C700,384 715,240 766,240" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#a1)"/>
+
+        <!-- nodes -->
+        <circle cx="210" cy="240" r="8.5" fill="currentColor"/>
+        <circle cx="350" cy="96"  r="8.5" fill="currentColor"/>
+        <circle cx="490" cy="240" r="8.5" fill="currentColor"/>
+        <circle cx="630" cy="384" r="8.5" fill="var(--accent)"/>
+        <circle cx="770" cy="240" r="8.5" fill="currentColor"/>
+
+        <!-- tag chips -->
+        <line x1="210" y1="249" x2="210" y2="272" stroke="var(--ink-faint)" stroke-width="1.5"/>
+        <rect x="174" y="272" width="72" height="23" rx="4" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="210" y="287.5" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-soft)" text-anchor="middle">v1.4.2</text>
+
+        <line x1="770" y1="249" x2="770" y2="272" stroke="var(--accent)" stroke-width="1.5"/>
+        <rect x="734" y="272" width="72" height="23" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="770" y="287.5" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="600" fill="var(--accent)" text-anchor="middle">v1.5.0</text>
+
+        <!-- range bracket -->
+        <g stroke="var(--ink-faint)" stroke-width="1.2">
+          <line x1="210" y1="318" x2="490" y2="318"/>
+          <line x1="210" y1="312" x2="210" y2="324"/>
+          <line x1="490" y1="312" x2="490" y2="324"/>
+        </g>
+        <text x="350" y="340" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-soft)" text-anchor="middle">git log v1.4.2..HEAD  →  1 commit</text>
+
+        <!-- step 1 -->
+        <circle cx="300" cy="62" r="10" fill="currentColor"/>
+        <text x="300" y="66" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="600" fill="var(--on-accent)" text-anchor="middle">1</text>
+        <text x="318" y="66" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">feat: add retry backoff</text>
+
+        <!-- step 2 -->
+        <circle cx="506" cy="206" r="10" fill="currentColor"/>
+        <text x="506" y="210" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="600" fill="var(--on-accent)" text-anchor="middle">2</text>
+        <text x="524" y="210" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">PR #12 squash-merged</text>
+
+        <!-- step 3 -->
+        <circle cx="604" cy="420" r="10" fill="var(--accent)"/>
+        <text x="604" y="424" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="600" fill="var(--on-accent)" text-anchor="middle">3</text>
+        <text x="622" y="424" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--accent)">cicada run  →  release PR #13</text>
+        <text x="622" y="441" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-soft)">one commit, committer cicada[bot], force-pushed</text>
+
+        <!-- step 4 -->
+        <circle cx="786" cy="206" r="10" fill="currentColor"/>
+        <text x="786" y="210" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="600" fill="var(--on-accent)" text-anchor="middle">4</text>
+        <text x="804" y="210" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">release PR #13 merged</text>
+
+        <!-- step 5 -->
+        <circle cx="820" cy="330" r="10" fill="var(--accent)"/>
+        <text x="820" y="334" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="600" fill="var(--on-accent)" text-anchor="middle">5</text>
+        <text x="838" y="330" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--accent)">cicada run  →  tag v1.5.0</text>
+        <text x="838" y="347" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-soft)">+ GitHub release</text>
+
+        <!-- legend -->
+        <line x1="176" y1="452" x2="1000" y2="452" stroke="var(--rule)"/>
+        <circle cx="184" cy="476" r="6" fill="currentColor"/>
+        <text x="198" y="480" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-soft)">human</text>
+        <circle cx="340" cy="476" r="6" fill="var(--accent)"/>
+        <text x="354" y="480" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-soft)">cicada</text>
+      </svg>
+    </div>
+    <figcaption>Two pushes to <span class="mono">main</span>, two identical CI runs of <span class="mono">cicada run</span>. The first one proposes the release; the second one, triggered by merging what the first proposed, executes it. Nothing else calls cicada.</figcaption>
+  </figure>
+
+  <div class="col" style="margin-top:30px">
+    <p>The loop closes on itself: cicada&rsquo;s own commit at step&nbsp;3 is what a human merges at step&nbsp;4, and that merge is what triggers step&nbsp;5. Step&nbsp;3 is the part worth slowing down on &mdash; see below.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">02</span><div><h2>Base and head are different branches</h2></div></div>
+  <div class="col"><p>The release PR merges into the branch it targets, like any other PR. What gets discarded and recomputed is the <em>other</em> end &mdash; the branch the PR is opened <em>from</em>, which cicada owns outright and rewrites on every push.</p></div>
+
+  <dl class="kv" style="max-width:74ch; margin-bottom:30px">
+    <dt>base &nbsp;<span class="c">(target)</span></dt><dd><span class="mono">main</span> &mdash; owned by humans. cicada only ever reaches it through a merge.</dd>
+    <dt>head &nbsp;<span class="c">(source)</span></dt><dd><span class="mono">cicada/main</span> &mdash; owned by cicada. Reset, rewritten, force-pushed.</dd>
+  </dl>
+
+  <figure>
+    <div class="svg-frame scroller">
+      <svg viewBox="0 0 1080 540" role="img" aria-label="Four stages: cicada opens a release PR proposing 1.4.3; a developer pushes a commit to main making it stale; cicada resets the head branch to main's tip and force-pushes a recomputed commit proposing 1.5.0, discarding the first; a human then merges that PR into main as an ordinary merge.">
+        <defs>
+          <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+          <marker id="a3t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/>
+          </marker>
+        </defs>
+
+        <!-- ================= t0 ================= -->
+        <text x="150" y="42" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="600" fill="var(--ink-faint)">t0</text>
+        <text x="184" y="42" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">cicada opens the release PR</text>
+        <line x1="190" y1="82" x2="660" y2="82" stroke="currentColor" stroke-width="2"/>
+        <circle cx="230" cy="82" r="7.5" fill="currentColor"/><text x="230" y="66" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle">A</text>
+        <circle cx="310" cy="82" r="7.5" fill="currentColor"/><text x="310" y="66" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle">B</text>
+        <path d="M310,82 C340,82 344,122 366,122" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#a3t)"/>
+        <circle cx="370" cy="122" r="7.5" fill="var(--accent)"/>
+        <text x="386" y="126" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--accent)">R1 &middot; 1.4.3</text>
+        <g font-family="IBM Plex Mono, monospace">
+          <text x="740" y="74" font-size="12" fill="var(--ink)">PR #13 opened</text>
+          <text x="740" y="92" font-size="11" fill="var(--ink-soft)">base = main</text>
+          <text x="740" y="108" font-size="11" fill="var(--ink-soft)">head = cicada/main</text>
+        </g>
+
+        <!-- ================= t1 ================= -->
+        <line x1="150" y1="152" x2="1040" y2="152" stroke="var(--rule)"/>
+        <text x="150" y="186" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="600" fill="var(--ink-faint)">t1</text>
+        <text x="184" y="186" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">a developer merges a feat to main</text>
+        <line x1="190" y1="226" x2="660" y2="226" stroke="currentColor" stroke-width="2"/>
+        <circle cx="230" cy="226" r="7.5" fill="currentColor"/>
+        <circle cx="310" cy="226" r="7.5" fill="currentColor"/>
+        <circle cx="410" cy="226" r="7.5" fill="currentColor"/><text x="410" y="210" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--warn)" text-anchor="middle">C</text>
+        <path d="M310,226 C340,226 344,266 366,266" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 4"/>
+        <circle cx="370" cy="266" r="7.5" fill="none" stroke="var(--accent)" stroke-width="2"/>
+        <text x="386" y="270" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-faint)">R1 &middot; 1.4.3</text>
+        <g font-family="IBM Plex Mono, monospace">
+          <text x="740" y="222" font-size="12" fill="var(--warn)">PR #13 is now stale</text>
+          <text x="740" y="240" font-size="11" fill="var(--ink-soft)">R1 knows nothing about C</text>
+        </g>
+
+        <!-- ================= t2 ================= -->
+        <line x1="150" y1="296" x2="1040" y2="296" stroke="var(--rule)"/>
+        <text x="150" y="330" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="600" fill="var(--accent)">t2</text>
+        <text x="184" y="330" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--accent)">cicada runs: reset head to C, recompute, force-push</text>
+        <line x1="190" y1="370" x2="660" y2="370" stroke="currentColor" stroke-width="2"/>
+        <circle cx="230" cy="370" r="7.5" fill="currentColor"/>
+        <circle cx="310" cy="370" r="7.5" fill="currentColor"/>
+        <circle cx="410" cy="370" r="7.5" fill="currentColor"/>
+        <!-- discarded R1 -->
+        <circle cx="370" cy="410" r="7.5" fill="none" stroke="var(--ink-faint)" stroke-width="1.5" stroke-dasharray="3 3"/>
+        <line x1="358" y1="422" x2="382" y2="398" stroke="var(--ink-faint)" stroke-width="1.5"/>
+        <text x="300" y="414" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end">R1 discarded</text>
+        <!-- new R2 off C -->
+        <path d="M410,370 C440,370 444,410 466,410" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#a3t)"/>
+        <circle cx="470" cy="410" r="7.5" fill="var(--accent)"/>
+        <text x="486" y="414" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--accent)">R2 &middot; 1.5.0</text>
+        <g font-family="IBM Plex Mono, monospace">
+          <text x="740" y="366" font-size="12" fill="var(--accent)">same PR #13, new diff</text>
+          <text x="740" y="384" font-size="11" fill="var(--ink-soft)">R1 is not rebased onto C and</text>
+          <text x="740" y="400" font-size="11" fill="var(--ink-soft)">not merged into R2 &mdash; it is gone</text>
+        </g>
+
+        <!-- ================= t3 ================= -->
+        <line x1="150" y1="440" x2="1040" y2="440" stroke="var(--rule)"/>
+        <text x="150" y="474" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="600" fill="var(--ink-faint)">t3</text>
+        <text x="184" y="474" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">a human merges the PR</text>
+        <line x1="190" y1="514" x2="660" y2="514" stroke="currentColor" stroke-width="2"/>
+        <circle cx="230" cy="514" r="7.5" fill="currentColor"/>
+        <circle cx="310" cy="514" r="7.5" fill="currentColor"/>
+        <circle cx="410" cy="514" r="7.5" fill="currentColor"/>
+        <path d="M470,494 C500,494 504,514 526,514" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#a3)"/>
+        <circle cx="470" cy="494" r="7.5" fill="var(--accent)"/>
+        <text x="470" y="478" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--accent)" text-anchor="middle">R2</text>
+        <circle cx="530" cy="514" r="7.5" fill="currentColor"/><text x="546" y="518" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-soft)">M</text>
+        <g font-family="IBM Plex Mono, monospace">
+          <text x="740" y="510" font-size="12" fill="var(--ink)">PR #13 merged into main</text>
+          <text x="740" y="528" font-size="11" fill="var(--ink-soft)">an ordinary merge &mdash; nothing special</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Only the head branch is disposable, and only while the PR is open. It always holds exactly one commit whose parent is main&rsquo;s current tip &mdash; so there is never a conflict to resolve, because nothing is ever being reconciled.</figcaption>
+  </figure>
+
+  <div class="note col">
+    <h3>Why discard instead of update</h3>
+    <p>R2 is a pure function of three inputs: main&rsquo;s tip, the anchor tag, and the config. Nothing in R1 is worth keeping &mdash; it is a stale answer to a question that has since changed. Rebasing R1 onto C would mean reconciling two changelog entries and two version numbers against each other, which generates conflicts for no gain.</p>
+    <p>The one exception: if the head&rsquo;s tip is <em>not</em> cicada&rsquo;s own commit, a human put something there that is not derivable from main. cicada refuses to clobber it &mdash; it drafts the PR, labels it <span class="mono">cicada:stale</span>, comments why, and exits 4.</p>
+  </div>
+
+  <div class="note col">
+    <h3>One word, three meanings &mdash; so only one keeps it</h3>
+    <p>&ldquo;Release branch&rdquo; was doing three jobs in the design docs: the git-flow line <span class="mono">release/1.4</span>, the allowlisted branch cicada runs on, and cicada&rsquo;s own PR head. The first two are the same thing and keep the name. The third was renamed: the config key is now <span class="mono">release_pr_branch</span>, a sibling of <span class="mono">release_pr_title</span>, and in prose it is always <em>the release PR branch</em> &mdash; never shortened.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">03</span><div><h2>Inside step 3</h2></div></div>
+
+  <figure>
+    <div class="svg-frame scroller">
+      <svg viewBox="0 0 1080 880" role="img" aria-label="Pipeline inside one cicada run: Phase B reconciles tags and finds nothing to do, then Phase A reads the commit range, computes a minor bump to 1.5.0, checks the tag is not already taken, renders three file edits, force-pushes the release PR branch and upserts the pull request.">
+        <defs>
+          <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--ink-faint)"/>
+          </marker>
+          <marker id="a2t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/>
+          </marker>
+        </defs>
+
+        <!-- PHASE B -->
+        <rect x="60" y="24" width="960" height="104" rx="7" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="80" y="52" font-family="Bricolage Grotesque, sans-serif" font-size="13" font-weight="700" letter-spacing="1.4" fill="var(--ink)">PHASE B — RECONCILE</text>
+        <text x="252" y="52" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-faint)">runs first, always (#35)</text>
+
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5">
+          <rect x="80" y="72" width="182" height="34" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="171" y="93.5" fill="var(--ink)" text-anchor="middle">versions file → 1.4.2</text>
+          <line x1="262" y1="89" x2="278" y2="89" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a2)"/>
+
+          <rect x="286" y="72" width="182" height="34" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="377" y="93.5" fill="var(--ink)" text-anchor="middle">tag v1.4.2 · reachable</text>
+          <line x1="468" y1="89" x2="484" y2="89" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a2)"/>
+
+          <rect x="492" y="72" width="182" height="34" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="583" y="93.5" fill="var(--ink)" text-anchor="middle">release object exists</text>
+
+          <text x="700" y="93.5" fill="var(--ink-soft)">⇒ already released — no writes</text>
+        </g>
+
+        <!-- connector -->
+        <line x1="540" y1="128" x2="540" y2="170" stroke="var(--ink-faint)" stroke-width="1.6" marker-end="url(#a2)"/>
+        <text x="556" y="154" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-faint)">then, in the same command</text>
+
+        <!-- PHASE A -->
+        <rect x="60" y="180" width="960" height="672" rx="7" fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="80" y="210" font-family="Bricolage Grotesque, sans-serif" font-size="13" font-weight="700" letter-spacing="1.4" fill="var(--accent)">PHASE A — PLAN AND PROPOSE</text>
+
+        <g font-family="IBM Plex Mono, monospace" font-size="12.5">
+          <!-- S1 -->
+          <rect x="130" y="232" width="390" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="148" y="259" fill="var(--ink)">anchor = v1.4.2 → git log v1.4.2..HEAD</text>
+          <text x="540" y="259" font-size="11.5" fill="var(--ink-soft)">1 commit in range</text>
+          <line x1="325" y1="276" x2="325" y2="294" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a2)"/>
+
+          <!-- S2 -->
+          <rect x="130" y="296" width="390" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="148" y="323" fill="var(--ink)">parse conventional commit</text>
+          <text x="540" y="323" font-size="11.5" fill="var(--ink-soft)">type=feat · scope=∅ · breaking=no</text>
+          <line x1="325" y1="340" x2="325" y2="358" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a2)"/>
+
+          <!-- S3 -->
+          <rect x="130" y="360" width="390" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="148" y="387" fill="var(--ink)">route by scope</text>
+          <text x="540" y="387" font-size="11.5" fill="var(--ink-soft)">∅ → default_scope → package "app"</text>
+          <line x1="325" y1="404" x2="325" y2="422" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a2)"/>
+
+          <!-- S4 -->
+          <rect x="130" y="424" width="390" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="148" y="451" fill="var(--ink)">compute bump</text>
+          <text x="540" y="451" font-size="11.5" fill="var(--accent)">feat ⇒ minor · 1.4.2 → 1.5.0</text>
+          <line x1="325" y1="468" x2="325" y2="486" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a2)"/>
+
+          <!-- S5 collision check -->
+          <rect x="130" y="488" width="390" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="148" y="515" fill="var(--ink)">is tag v1.5.0 already taken?</text>
+          <text x="540" y="509" font-size="11.5" fill="var(--ink-soft)">no ⇒ proceed. If it existed on another</text>
+          <text x="540" y="525" font-size="11.5" fill="var(--ink-soft)">branch: exit 4, before any PR is opened</text>
+          <line x1="325" y1="532" x2="325" y2="550" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#a2t)"/>
+
+          <!-- S6 render -->
+          <rect x="130" y="552" width="820" height="44" rx="5" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="148" y="579" fill="var(--accent)">render → Vec&lt;FileEdit&gt;</text>
+          <text x="420" y="579" font-size="11.5" fill="var(--ink-soft)">pure data: path + final content. The writer is three lines outside this.</text>
+
+          <!-- fan-out -->
+          <path d="M260,596 L260,620" fill="none" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#a2t)"/>
+          <path d="M540,596 L540,620" fill="none" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#a2t)"/>
+          <path d="M820,596 L820,620" fill="none" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#a2t)"/>
+
+          <rect x="130" y="624" width="260" height="58" rx="5" fill="var(--surface)" stroke="var(--accent)"/>
+          <text x="148" y="647" font-size="12" fill="var(--ink)">Cargo.toml</text>
+          <text x="148" y="666" font-size="11.5" fill="var(--accent)">version → "1.5.0"</text>
+
+          <rect x="410" y="624" width="260" height="58" rx="5" fill="var(--surface)" stroke="var(--accent)"/>
+          <text x="428" y="647" font-size="12" fill="var(--ink)">CHANGELOG.md</text>
+          <text x="428" y="666" font-size="11.5" fill="var(--accent)">+ ## 1.5.0 entry</text>
+
+          <rect x="690" y="624" width="260" height="58" rx="5" fill="var(--surface)" stroke="var(--accent)"/>
+          <text x="708" y="647" font-size="12" fill="var(--ink)">.cicada-versions.toml</text>
+          <text x="708" y="666" font-size="11.5" fill="var(--accent)">version → "1.5.0"</text>
+
+          <line x1="540" y1="682" x2="540" y2="704" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#a2t)"/>
+
+          <!-- S7 -->
+          <rect x="130" y="708" width="820" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="148" y="735" fill="var(--ink)">reset cicada/main → HEAD · commit as cicada[bot] · force-push</text>
+          <line x1="540" y1="752" x2="540" y2="770" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#a2t)"/>
+
+          <!-- S8 -->
+          <rect x="130" y="774" width="820" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="148" y="801" fill="var(--ink)">find_pull_request("cicada/main") → None · create_pull_request(base=main)</text>
+          <text x="148" y="838" font-size="11.5" fill="var(--ink-faint)">keyed on the head branch, never the title — and open PRs only, so the upsert is idempotent</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>One command, two passes. On this push Phase B has nothing to do — <span class="mono">v1.4.2</span> is already tagged and already released — so all the work is Phase A&rsquo;s. At step&nbsp;5 the roles invert: Phase B cuts the tag, and Phase A finds an empty range and makes no forge call at all.</figcaption>
+  </figure>
+
+  <div class="note col">
+    <h3>What Phase B does at step 5</h3>
+    <p>It finds <span class="mono">1.5.0</span> in the versions file, derives <span class="mono">v1.5.0</span>, sees it missing — and before creating it, <em>replans</em> from the previous tag. If the range now justifies more than <span class="mono">1.5.0</span>, the release PR was merged while stale and cicada refuses. The comparison is one-sided: a recorded version <em>higher</em> than the recomputation is a deliberate over-bump and passes.</p>
+    <p>That check runs <em>only</em> when a tag is about to be created. Run on every push it would fire the moment the next <span class="mono">fix:</span> lands, because the range legitimately grows again. Tag and release object then reconcile independently, so a release call that fails after the tag lands is repaired on the next push rather than stranded.</p>
+  </div>
+
+  <div class="note col">
+    <h3>Why B before A</h3>
+    <p>If Phase A ran first it would still be anchored on the <em>old</em> tag, re-include everything the just-merged release contained, and propose releasing it all again — duplicate changelog entries, every cycle. <span class="mono">cicada run</span> does both in order so a CI file cannot express the broken one.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">04</span><div><h2>cicada.toml</h2></div></div>
+  <div class="col"><p>Human-owned, read from the branch being released. This is the whole file for this repo — written by hand. There is no <span class="mono">cicada init</span>: scanning a repo to guess its layout is opinion that has to be reviewed line by line anyway, so <span class="mono">check</span> does the validation instead.</p></div>
+
+  <div class="code">
+    <div class="code-bar"><span class="f">cicada.toml</span><span class="t">human-owned · committed</span></div>
+<pre><span class="c"># acme/app — one Rust service, no umbrella</span>
+
+[settings]
+release_branches  = ["main"]                  <span class="c"># the gate: cicada acts only on these</span>
+default_scope     = "app"                     <span class="req">&lt;- required</span> <span class="c">unscoped commits land here</span>
+committer         = "cicada[bot] &lt;cicada@users.noreply.github.com&gt;"
+commit_source     = "commits"                 <span class="c"># --no-merges; identical on squash/rebase repos</span>
+
+<span class="c"># the release PR cicada opens — its head branch and its title</span>
+release_pr_branch = "cicada/{branch}"         <span class="c"># the PR's HEAD; base is the branch above</span>
+release_pr_title  = "chore(release): {summary}"
+
+<span class="c"># Branch *identity* is declared as patterns, never as a flag living on the branch.
+# This repo has neither kind of line yet; both are shown for shape.
+# maintenance_branches   = ["release/*"]      # patch-only: a computed minor is an error
+# prerelease_branches    = ["prerelease-*"]  # cuts 1.5.0-rc.N instead of 1.5.0
+# prerelease_identifier  = "rc"</span>
+
+[forge]
+kind = "github"                              <span class="req">&lt;- required</span> <span class="c">never guessed at release time</span>
+repo = "acme/app"                            <span class="c"># optional — derived from origin when absent</span>
+
+<span class="c"># `bump` decides whether a type justifies a release at all.
+# `title` / `hidden` only decide how it renders.</span>
+[changelog]
+sections = [
+  { type = "feat",  title = "Features",      bump = "minor" },
+  { type = "fix",   title = "Bug Fixes",     bump = "patch" },
+  { type = "perf",  title = "Performance",   bump = "patch" },
+  { type = "docs",  title = "Documentation", bump = "none"  },
+  { type = "chore", title = "Chores",        bump = "none", hidden = true },
+]
+
+[packages.app]                               <span class="req">&lt;- required</span> <span class="c">the package list is explicit, always</span>
+path       = "."
+tag_format = "v{version}"
+changelog  = "CHANGELOG.md"
+
+[[packages.app.updaters]]
+kind = "cargo"
+path = "Cargo.toml"
+
+<span class="c"># no [umbrella] — a single-service repo has no aggregate version to declare</span>
+</pre>
+  </div>
+
+  <div class="two" style="margin-top:26px">
+    <div>
+      <h3>What makes this the single-service shape</h3>
+      <dl class="kv">
+        <dt>no [umbrella]</dt><dd>Opt-in. cicada never assumes an aggregate version.</dd>
+        <dt>one [packages.*]</dt><dd>Length 1 is not a mode — the monorepo path, with one entry.</dd>
+        <dt>default_scope</dt><dd>Points at the only package, so <span class="mono">feat:</span> and <span class="mono">feat(app):</span> are the same commit.</dd>
+        <dt>tag_format</dt><dd>Plain <span class="mono">v{version}</span>, because nothing needs disambiguating.</dd>
+      </dl>
+    </div>
+    <div>
+      <h3>Things this config will not tolerate</h3>
+      <dl class="kv">
+        <dt>tag_fromat = …</dt><dd>Unknown keys are an error naming the key, never a silent no-op.</dd>
+        <dt>feat(parser):</dt><dd>Unknown scope is fatal. <span class="mono">check</span> exits 3 with <em>did you mean &lsquo;app&rsquo;?</em></dd>
+        <dt>chore(deps): …</dt><dd>Alone in a range it produces <em>no release</em> — bump is <span class="mono">none</span>.</dd>
+        <dt>no forge.kind</dt><dd>Required at release time; the error names the value it would have detected.</dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="note open col">
+    <h3>Still undecided in the design</h3>
+    <p><span class="mono">{summary}</span> in <span class="mono">release_pr_title</span> has no defined rendering yet — for one package or for many. The figures above assume <span class="mono">chore(release): v1.5.0</span>. It is one of the three items still open in <span class="mono">docs/design.md</span>.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">05</span><div><h2>.cicada-versions.toml</h2></div></div>
+  <div class="col"><p>Tool-owned, written by cicada and committed by the release PR. It sits beside <span class="mono">cicada.toml</span> at the repo root, and it is the sole source of truth for versions — <span class="mono">Cargo.toml</span> is an output, never read back.</p></div>
+
+  <div class="states">
+    <div class="state">
+      <span class="when">before any release</span>
+      <pre><span class="c">// the file does not exist</span></pre>
+      <p>An <em>absent entry</em> means never released. There is no sentinel version. The first release takes all reachable history and computes from <span class="mono">0.0.0</span>.</p>
+    </div>
+    <div class="state">
+      <span class="when">at rest · steps <b>1</b>–<b>2</b></span>
+      <pre>[packages.app]
+version = "1.4.2"</pre>
+      <p><span class="mono">v1.4.2</span> is a real tag, reachable from HEAD. That tag — derived from this number — is the only anchor cicada has.</p>
+    </div>
+    <div class="state">
+      <span class="when">after step <b>4</b></span>
+      <pre>[packages.app]
+version = <span class="add">"1.5.0"</span></pre>
+      <p>Written by cicada on the release PR branch at step&nbsp;3; reaches <span class="mono">main</span> only when a human merges. Step&nbsp;5 derives <span class="mono">v1.5.0</span> from it and tags.</p>
+    </div>
+  </div>
+
+  <div class="note col" style="margin-top:34px">
+    <h3>A version and nothing else</h3>
+    <p>No commit SHA. No date, no PR number, no changelog pointer, no label state. Every one of those was considered and removed: a stored SHA is a mechanism for silently continuing on a <em>wrong</em> range, and everything it was doing is now recomputed from the tag instead. The one field that can ever join it is <span class="mono">prerelease</span>, and only while an <span class="mono">rc</span> line is open on a branch.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">06</span><div><h2>When each version actually moves</h2></div></div>
+
+  <figure>
+    <div class="svg-frame scroller">
+      <svg viewBox="0 0 1080 330" role="img" aria-label="Timing chart: the versions file, Cargo.toml and CHANGELOG.md take their new value on the release PR branch at step 3 and reach main at step 4; the git tag and forge release are created at step 5.">
+        <!-- step guides -->
+        <g stroke="var(--rule)" stroke-dasharray="2 5" stroke-width="1.2">
+          <line x1="300" y1="72" x2="300" y2="278"/>
+          <line x1="420" y1="72" x2="420" y2="278"/>
+          <line x1="560" y1="72" x2="560" y2="278"/>
+          <line x1="720" y1="72" x2="720" y2="278"/>
+          <line x1="880" y1="72" x2="880" y2="278"/>
+        </g>
+
+        <!-- step headers -->
+        <g font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle">
+          <circle cx="300" cy="34" r="9" fill="currentColor"/><text x="300" y="37.5" font-size="10" font-weight="600" fill="var(--on-accent)">1</text>
+          <text x="300" y="60">feature commit</text>
+          <circle cx="420" cy="34" r="9" fill="currentColor"/><text x="420" y="37.5" font-size="10" font-weight="600" fill="var(--on-accent)">2</text>
+          <text x="420" y="60">merged to main</text>
+          <circle cx="560" cy="34" r="9" fill="var(--accent)"/><text x="560" y="37.5" font-size="10" font-weight="600" fill="var(--on-accent)">3</text>
+          <text x="560" y="60">release PR opened</text>
+          <circle cx="720" cy="34" r="9" fill="currentColor"/><text x="720" y="37.5" font-size="10" font-weight="600" fill="var(--on-accent)">4</text>
+          <text x="720" y="60">release PR merged</text>
+          <circle cx="880" cy="34" r="9" fill="var(--accent)"/><text x="880" y="37.5" font-size="10" font-weight="600" fill="var(--on-accent)">5</text>
+          <text x="880" y="60">tagged</text>
+        </g>
+
+        <!-- rows -->
+        <g font-family="IBM Plex Mono, monospace" font-size="11">
+          <!-- row 1 -->
+          <text x="264" y="96" fill="var(--ink)" text-anchor="end">.cicada-versions.toml</text>
+          <rect x="280" y="82" width="280" height="22" rx="4" fill="var(--surface-2)" stroke="var(--rule)"/>
+          <text x="420" y="97" fill="var(--ink-soft)" text-anchor="middle">1.4.2</text>
+          <rect x="560" y="82" width="160" height="22" rx="4" fill="none" stroke="var(--accent)" stroke-dasharray="4 3"/>
+          <text x="640" y="97" fill="var(--accent)" text-anchor="middle">1.5.0</text>
+          <rect x="720" y="82" width="280" height="22" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="860" y="97" fill="var(--accent)" text-anchor="middle">1.5.0</text>
+
+          <!-- row 2 -->
+          <text x="264" y="138" fill="var(--ink)" text-anchor="end">Cargo.toml</text>
+          <rect x="280" y="124" width="280" height="22" rx="4" fill="var(--surface-2)" stroke="var(--rule)"/>
+          <text x="420" y="139" fill="var(--ink-soft)" text-anchor="middle">1.4.2</text>
+          <rect x="560" y="124" width="160" height="22" rx="4" fill="none" stroke="var(--accent)" stroke-dasharray="4 3"/>
+          <text x="640" y="139" fill="var(--accent)" text-anchor="middle">1.5.0</text>
+          <rect x="720" y="124" width="280" height="22" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="860" y="139" fill="var(--accent)" text-anchor="middle">1.5.0</text>
+
+          <!-- row 3 -->
+          <text x="264" y="180" fill="var(--ink)" text-anchor="end">CHANGELOG.md</text>
+          <rect x="280" y="166" width="280" height="22" rx="4" fill="var(--surface-2)" stroke="var(--rule)"/>
+          <text x="420" y="181" fill="var(--ink-soft)" text-anchor="middle">## 1.4.2 on top</text>
+          <rect x="560" y="166" width="160" height="22" rx="4" fill="none" stroke="var(--accent)" stroke-dasharray="4 3"/>
+          <text x="640" y="181" fill="var(--accent)" text-anchor="middle">## 1.5.0</text>
+          <rect x="720" y="166" width="280" height="22" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="860" y="181" fill="var(--accent)" text-anchor="middle">## 1.5.0 on top</text>
+
+          <!-- row 4 -->
+          <text x="264" y="222" fill="var(--ink)" text-anchor="end">git tag</text>
+          <rect x="280" y="208" width="600" height="22" rx="4" fill="var(--surface-2)" stroke="var(--rule)"/>
+          <text x="580" y="223" fill="var(--ink-soft)" text-anchor="middle">v1.4.2</text>
+          <rect x="880" y="208" width="120" height="22" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="940" y="223" fill="var(--accent)" text-anchor="middle">v1.5.0</text>
+
+          <!-- row 5 -->
+          <text x="264" y="264" fill="var(--ink)" text-anchor="end">forge release</text>
+          <rect x="280" y="250" width="600" height="22" rx="4" fill="var(--surface-2)" stroke="var(--rule)"/>
+          <text x="580" y="265" fill="var(--ink-soft)" text-anchor="middle">v1.4.2</text>
+          <rect x="880" y="250" width="120" height="22" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="940" y="265" fill="var(--accent)" text-anchor="middle">v1.5.0</text>
+        </g>
+
+        <!-- legend -->
+        <line x1="280" y1="292" x2="1000" y2="292" stroke="var(--rule)"/>
+        <g font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)">
+          <rect x="280" y="308" width="18" height="12" rx="3" fill="var(--surface-2)" stroke="var(--rule)"/>
+          <text x="306" y="318">value on main</text>
+          <rect x="430" y="308" width="18" height="12" rx="3" fill="none" stroke="var(--accent)" stroke-dasharray="4 3"/>
+          <text x="456" y="318">proposed — exists only inside the release PR</text>
+          <rect x="790" y="308" width="18" height="12" rx="3" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="816" y="318">released</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Six artifacts carry the version and they do not move together. Between releases, <span class="mono">main</span> carries an already-shipped number — there is no <span class="mono">-dev</span> or <span class="mono">-SNAPSHOT</span>, which is coherent because cicada does not build artifacts. A tag-triggered workflow does, and at the tag the stamp is accurate.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">07</span><div><h2>What the release PR contains</h2></div></div>
+  <div class="col"><p>One commit, authored by <span class="mono">cicada[bot]</span>, touching three files. This is the entire diff a reviewer sees at step&nbsp;4.</p></div>
+
+  <div class="three">
+    <div class="code">
+      <div class="code-bar"><span class="f">Cargo.toml</span><span class="t">cargo updater</span></div>
+<pre> [package]
+ name = "app"
+<span class="del">-version = "1.4.2"</span>
+<span class="add">+version = "1.5.0"</span>
+ edition = "2024"</pre>
+    </div>
+    <div class="code">
+      <div class="code-bar"><span class="f">.cicada-versions.toml</span><span class="t">tool-owned</span></div>
+<pre> [packages.app]
+<span class="del">-version = "1.4.2"</span>
+<span class="add">+version = "1.5.0"</span></pre>
+    </div>
+    <div class="code">
+      <div class="code-bar"><span class="f">CHANGELOG.md</span><span class="t">inserted at marker</span></div>
+<pre> # Changelog
+
+ &lt;!-- cicada:insert --&gt;
+<span class="add">+## 1.5.0 (2026-09-11)</span>
+<span class="add">+</span>
+<span class="add">+### Features</span>
+<span class="add">+</span>
+<span class="add">+* add retry backoff (a1b2c3d)</span>
+
+ ## 1.4.2 (2026-08-02)</pre>
+    </div>
+  </div>
+
+  <div class="col" style="margin-top:22px">
+    <p>The PR body is the same rendered notes the changelog entry carries — one template, two destinations, so they cannot drift. <span class="mono">Cargo.lock</span> is not in the list: cicada writes only what an updater declares.</p>
+  </div>
+
+  <div class="note col">
+    <h3>Rehearse the whole thing offline</h3>
+    <p><span class="mono">cicada release-pr --no-push</span> produces exactly this commit on a real local branch — no token, no network, no forge. Inspect it with <span class="mono">git show cicada/main</span>. <span class="mono">--dry-run</span> stops one step earlier and prints the same diff without writing, because it is the identical computation with the write skipped.</p>
+  </div>
+</section>
+
+<footer>
+  <hr class="rule" style="margin-bottom:20px">
+  scenario derived from docs/design.md and docs/scenarios/single-service.md · shape 1, one package, no umbrella
+</footer>
+
+</div>

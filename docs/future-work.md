@@ -158,3 +158,65 @@ ancestor for the new entries — a merge conflict generator. Out of scope, and a
 branch's changelog describes that branch.
 
 **Trigger:** someone actually being confused by it in practice.
+
+---
+
+## 11. Revert handling
+
+**Deferred because** doing it properly means matching a revert back to what it reverted, and the only
+reliable signal is a footer the author may not have written.
+
+**The problem it would solve.** Reverting a commit does not remove it from the range:
+
+```
+anchor v1.4.2 ── c1 feat: add export ── c2 revert: "feat: add export"
+```
+
+`git log v1.4.2..HEAD` returns **both**. c1 is still a `feat`, so the plan is still `1.5.0`, and the
+changelog advertises a feature whose code is no longer in the tree. `revert` is not in the default
+`sections` list, so c2 is an unknown type and is ignored entirely (§Commit parsing).
+
+**What it would take.** Parse `Reverts: <sha>` footers — the Conventional Commits convention — and drop
+both the revert and its target from the range. `git revert` itself writes `This reverts commit <sha>.`
+into the body rather than a footer, so a body fallback is needed to cover the common case, which means
+matching prose. Interactions to settle: a revert whose target is *before* the anchor (drop the revert,
+leave the version alone), a revert that is itself later reverted, and whether a reverted breaking change
+un-does the major bump.
+
+**Consequence while deferred.** Decision #34 (empty plan → close the open release PR) loses its motivating
+example. The behaviour still stands, but its realistic triggers are configuration edits — a section's
+`bump` flipped to `none`, a type renamed out of `sections`, a package removed while its PR is open — not
+reverts. Force-pushing a protected branch is not a trigger worth designing for.
+
+**Workaround today.** `--release-as app=1.4.3`, or a `Release-As:` footer on the revert commit, forces the
+version the author actually wants. The changelog entry still mentions the reverted feature.
+
+**Trigger:** the first time a released-then-reverted feature ships in a changelog and someone is misled by it.
+
+---
+
+## 12. `cicada init`
+
+**Deferred because** it is opinionated code in service of a step that happens once per repo, and the person
+running it is the only one who can check its answer.
+
+An earlier design had `init` scan the repo — classifying `Cargo.toml` files into virtual manifests, real
+packages and version-inheriting packages, reading `Chart.yaml` names while skipping vendored subcharts under
+`charts/`, pairing apps to charts by name, detecting the forge from `origin` — and emit
+`cicada.example.toml` for review. Every one of those is a heuristic that a developer must read line by line
+before renaming the file, because #8 makes the package list explicit precisely so a human owns it. The
+review is the expensive part, and `init` does not remove it.
+
+**v1 behaviour.** The developer writes `cicada.toml` by hand and, when adopting into a repo with existing
+history, seeds `.cicada-versions.toml` with the current version per package. Both files are small: the
+versions file is one number per package (#1), and `cicada check` validates the config against the repo —
+missing paths, duplicate tag formats, duplicate updater outputs, `default_scope` naming nothing, and the
+Cargo workspace-inheritance trap (#24). Shipped documentation carries a worked `cicada.toml` per repo shape,
+which is what an adopter actually copies from.
+
+**What it would take.** The scanner described above, plus the app⇄chart pairing heuristic and a loud warning
+for `version.workspace = true`. None of it is hard; all of it is opinion, and all of it needs reviewing
+anyway.
+
+**Trigger:** enough repos being onboarded that hand-writing the config becomes the bottleneck — the same
+trigger as §9, and the two should be built together if either is.

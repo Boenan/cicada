@@ -1,0 +1,605 @@
+<title>Cicada Maintenance Line</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;500&display=swap">
+
+<style>
+:root{
+  --ground:#F1F3F0; --surface:#FBFCFA; --surface-2:#E7EBE6;
+  --ink:#17201D; --ink-soft:#5C665F; --ink-faint:#8D968F;
+  --rule:#D4DAD2; --accent:#146A5E; --accent-deep:#0E4E45;
+  --accent-soft:#DCEBE6; --warn:#8C5416; --warn-soft:#F2E8D8;
+  --on-accent:#F1F3F0;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#101413; --surface:#171D1B; --surface-2:#1E2523;
+    --ink:#E4E9E5; --ink-soft:#99A39D; --ink-faint:#6E7873;
+    --rule:#2B3331; --accent:#58CDB9; --accent-deep:#7FDECD;
+    --accent-soft:#13312B; --warn:#D9A05C; --warn-soft:#2B2317;
+    --on-accent:#0B1110;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#101413; --surface:#171D1B; --surface-2:#1E2523;
+  --ink:#E4E9E5; --ink-soft:#99A39D; --ink-faint:#6E7873;
+  --rule:#2B3331; --accent:#58CDB9; --accent-deep:#7FDECD;
+  --accent-soft:#13312B; --warn:#D9A05C; --warn-soft:#2B2317;
+  --on-accent:#0B1110;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"Newsreader",Georgia,"Times New Roman",serif;
+  font-size:17px; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1140px; margin:0 auto; padding:0 28px 96px}
+.col{max-width:68ch}
+
+/* ---- type ---- */
+h1,h2,h3,.eyebrow,.badge-t{font-family:"Bricolage Grotesque","Helvetica Neue",Arial,sans-serif}
+h1{font-size:clamp(34px,5.2vw,54px); line-height:1.02; font-weight:700; letter-spacing:-.022em;
+   margin:0 0 18px; text-wrap:balance}
+h2{font-size:25px; font-weight:700; letter-spacing:-.012em; margin:0 0 10px; text-wrap:balance}
+h3{font-size:16px; font-weight:700; letter-spacing:-.004em; margin:0 0 8px}
+p{margin:0 0 16px}
+.eyebrow{
+  font-size:11px; font-weight:700; letter-spacing:.16em; text-transform:uppercase;
+  color:var(--accent); margin:0 0 12px
+}
+.lede{font-size:20px; line-height:1.5; color:var(--ink-soft); margin:0 0 8px}
+code,kbd,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+code{font-size:.86em; background:var(--surface-2); padding:.1em .35em; border-radius:3px}
+a{color:var(--accent); text-underline-offset:2px}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--accent); outline-offset:3px; border-radius:2px}
+
+/* ---- masthead ---- */
+header.top{padding:72px 0 8px}
+.rule{height:1px; background:var(--rule); border:0; margin:0}
+.meta{
+  display:flex; flex-wrap:wrap; gap:10px 28px; margin:26px 0 0;
+  font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-faint);
+  letter-spacing:.02em
+}
+.meta b{color:var(--ink-soft); font-weight:500}
+
+/* ---- sections ---- */
+section{padding:60px 0 0}
+.sec-head{display:flex; align-items:baseline; gap:16px; margin-bottom:22px}
+.sec-head .n{
+  font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink-faint);
+  font-weight:500; padding-top:6px
+}
+
+/* ---- figures ---- */
+figure{margin:0 0 8px}
+.scroller{overflow-x:auto; padding:6px 2px 10px; -webkit-overflow-scrolling:touch}
+.scroller svg{display:block; width:100%; min-width:760px; height:auto}
+figcaption{
+  font-size:13.5px; color:var(--ink-soft); max-width:70ch; line-height:1.5;
+  border-left:2px solid var(--rule); padding-left:12px; margin-top:6px
+}
+.svg-frame{background:var(--surface); border:1px solid var(--rule); border-radius:6px; padding:10px 14px}
+
+/* ---- code ---- */
+.code{
+  background:var(--surface); border:1px solid var(--rule); border-radius:6px;
+  overflow:hidden; margin:0 0 18px
+}
+.code-bar{
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+  padding:9px 16px; border-bottom:1px solid var(--rule); background:var(--surface-2);
+  font-family:"IBM Plex Mono",monospace; font-size:11.5px; letter-spacing:.03em;
+}
+.code-bar .f{color:var(--ink); font-weight:600}
+.code-bar .t{color:var(--ink-faint); text-transform:uppercase; letter-spacing:.12em; font-size:10px}
+.code pre{
+  margin:0; padding:16px 18px; overflow-x:auto;
+  font-size:12.8px; line-height:1.72; color:var(--ink)
+}
+.c{color:var(--ink-faint)}
+.req{color:var(--warn); font-weight:600}
+.add{color:var(--accent); font-weight:500}
+.del{color:var(--ink-faint); text-decoration:line-through}
+
+/* ---- grids ---- */
+.two{display:grid; grid-template-columns:1fr 1fr; gap:20px}
+.three{display:grid; grid-template-columns:repeat(3,1fr); gap:16px}
+@media(max-width:860px){.two,.three{grid-template-columns:1fr}}
+
+/* ---- state cards (versions file) ---- */
+.states{display:grid; grid-template-columns:repeat(3,1fr); gap:0; position:relative; margin-top:8px}
+.state{padding:0 20px; border-left:1px solid var(--rule)}
+.state:first-child{border-left:0; padding-left:0}
+.state .when{
+  font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.11em;
+  text-transform:uppercase; color:var(--ink-faint); margin-bottom:10px; display:block
+}
+.state .when b{color:var(--accent); font-weight:600}
+.state pre{
+  margin:0 0 10px; font-family:"IBM Plex Mono",monospace; font-size:12.4px; line-height:1.7;
+  background:var(--surface); border:1px solid var(--rule); border-radius:5px; padding:12px 14px;
+  overflow-x:auto; color:var(--ink)
+}
+.state p{font-size:13.5px; color:var(--ink-soft); line-height:1.5; margin:0}
+@media(max-width:860px){
+  .states{grid-template-columns:1fr}
+  .state{border-left:0; border-top:1px solid var(--rule); padding:20px 0 0}
+  .state:first-child{border-top:0; padding-top:0}
+}
+
+/* ---- notes ---- */
+.note{
+  border-left:2px solid var(--accent); background:var(--accent-soft);
+  padding:14px 18px; border-radius:0 5px 5px 0; margin:22px 0;
+  font-size:14.5px; line-height:1.55; max-width:72ch
+}
+.note.open{border-left-color:var(--warn); background:var(--warn-soft)}
+.note h3{margin-bottom:4px; font-size:13px; letter-spacing:.04em; text-transform:uppercase}
+.note p:last-child{margin-bottom:0}
+
+/* ---- key/value list ---- */
+dl.kv{margin:0; display:grid; grid-template-columns:auto 1fr; gap:0 22px; align-items:baseline}
+dl.kv dt{
+  font-family:"IBM Plex Mono",monospace; font-size:12.5px; color:var(--ink);
+  padding:9px 0; border-top:1px solid var(--rule); white-space:nowrap
+}
+dl.kv dd{margin:0; padding:9px 0; border-top:1px solid var(--rule); font-size:14.5px; color:var(--ink-soft)}
+dl.kv dt:first-of-type,dl.kv dd:first-of-type{border-top:0}
+@media(max-width:640px){
+  dl.kv{grid-template-columns:1fr; gap:0}
+  dl.kv dd{border-top:0; padding-top:0}
+}
+
+footer{padding:64px 0 0; font-size:13px; color:var(--ink-faint); font-family:"IBM Plex Mono",monospace}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <p class="eyebrow">cicada · scenario walkthrough</p>
+  <h1>The cicada release loop scenario 2</h1>
+  <p class="lede col">The same repo and the same service, now shipping two lines at once. <span class="mono">main</span> is on 1.5.x; <span class="mono">release/1.4</span> still owes its consumers patches. One fix, cherry-picked, releases twice under two different numbers.</p>
+  <div class="meta">
+    <span><b>repo</b> acme/app</span>
+    <span><b>package</b> app</span>
+    <span><b>arrangement</b> trunk releases (#81)</span>
+    <span><b>main</b> 1.5.0 → 1.5.1</span>
+    <span><b>release/1.4</b> 1.4.7 → 1.4.8</span>
+  </div>
+</header>
+
+<section>
+  <div class="sec-head"><span class="n">01</span><div><h2>Two lines, one repo</h2></div></div>
+  <div class="col"><p>A bug is found after 1.5.0 shipped. It is fixed on <span class="mono">main</span> and cherry-picked back onto the maintenance line. Cicada runs on both branches, from the same config, and neither knows the other exists.</p></div>
+
+  <figure>
+    <div class="svg-frame scroller">
+      <svg viewBox="0 0 1080 560" role="img" aria-label="Git graph: a feat takes main from v1.4.7 to v1.5.0; release/1.4 is cut from the v1.4.7 tag, before that feat. A fix lands on main and is cherry-picked to release/1.4. Each branch runs its own release PR, producing v1.5.1 on main and v1.4.8 on the maintenance line.">
+        <defs>
+          <marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="m1t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+          <marker id="m1d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ink-faint)"/></marker>
+        </defs>
+
+        <line x1="230" y1="208" x2="1020" y2="208" stroke="var(--rule)" stroke-dasharray="1 6" stroke-width="1.5"/>
+        <line x1="230" y1="414" x2="1020" y2="414" stroke="var(--rule)" stroke-dasharray="1 6" stroke-width="1.5"/>
+
+        <g font-family="IBM Plex Mono, monospace" font-size="10.5" text-anchor="end">
+          <text x="200" y="134" fill="var(--ink-soft)">main</text>
+          <text x="200" y="212" fill="var(--accent)">cicada/main</text>
+          <text x="200" y="340" fill="var(--ink-soft)">release/1.4</text>
+          <text x="200" y="418" fill="var(--accent)">cicada/release/1.4</text>
+        </g>
+
+        <line x1="230" y1="130" x2="1020" y2="130" stroke="currentColor" stroke-width="2"/>
+        <path d="M270,130 C320,130 340,336 420,336" fill="none" stroke="currentColor" stroke-width="2"/>
+        <line x1="420" y1="336" x2="1020" y2="336" stroke="currentColor" stroke-width="2"/>
+
+        <path d="M620,130 C670,130 680,208 726,208" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#m1t)"/>
+        <path d="M730,208 C790,208 810,130 856,130" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#m1)"/>
+        <path d="M620,336 C670,336 680,414 726,414" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#m1t)"/>
+        <path d="M730,414 C790,414 810,336 856,336" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#m1)"/>
+
+        <line x1="620" y1="146" x2="620" y2="300" stroke="var(--ink-faint)" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#m1d)"/>
+        <text x="606" y="232" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-soft)" text-anchor="end">cherry-pick</text>
+        <text x="606" y="248" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end">same change, new sha</text>
+
+        <circle cx="270" cy="130" r="7.5" fill="currentColor"/>
+        <circle cx="350" cy="130" r="7.5" fill="currentColor"/>
+        <circle cx="440" cy="130" r="7.5" fill="currentColor"/>
+        <circle cx="620" cy="130" r="7.5" fill="currentColor"/>
+        <circle cx="860" cy="130" r="7.5" fill="currentColor"/>
+        <circle cx="730" cy="208" r="7.5" fill="var(--accent)"/>
+        <circle cx="620" cy="336" r="7.5" fill="currentColor"/>
+        <circle cx="860" cy="336" r="7.5" fill="currentColor"/>
+        <circle cx="730" cy="414" r="7.5" fill="var(--accent)"/>
+
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5" text-anchor="middle" fill="currentColor">
+          <text x="350" y="72">feat: add token refresh</text>
+          <text x="620" y="72">fix: reject empty auth header</text>
+        </g>
+        <g stroke="var(--ink-faint)" stroke-width="1.2">
+          <line x1="350" y1="80" x2="350" y2="123"/>
+          <line x1="620" y1="80" x2="620" y2="123"/>
+        </g>
+
+        <line x1="270" y1="116" x2="270" y2="123" stroke="var(--ink-faint)" stroke-width="1.5"/>
+        <rect x="234" y="94" width="72" height="22" rx="4" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="270" y="109" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)" text-anchor="middle">v1.4.7</text>
+
+        <line x1="440" y1="116" x2="440" y2="123" stroke="var(--ink-faint)" stroke-width="1.5"/>
+        <rect x="404" y="94" width="72" height="22" rx="4" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="440" y="109" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)" text-anchor="middle">v1.5.0</text>
+
+        <line x1="860" y1="116" x2="860" y2="123" stroke="var(--accent)" stroke-width="1.5"/>
+        <rect x="824" y="94" width="72" height="22" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="860" y="109" font-family="IBM Plex Mono, monospace" font-size="10.5" font-weight="600" fill="var(--accent)" text-anchor="middle">v1.5.1</text>
+
+        <text x="620" y="316" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="currentColor" text-anchor="middle">fix: reject empty auth header</text>
+        <line x1="620" y1="322" x2="620" y2="329" stroke="var(--ink-faint)" stroke-width="1.2"/>
+
+        <line x1="860" y1="316" x2="860" y2="329" stroke="var(--accent)" stroke-width="1.5"/>
+        <rect x="824" y="294" width="72" height="22" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="860" y="309" font-family="IBM Plex Mono, monospace" font-size="10.5" font-weight="600" fill="var(--accent)" text-anchor="middle">v1.4.8</text>
+
+        <text x="234" y="250" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-soft)">cut at v1.4.7</text>
+        <text x="234" y="266" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)">before the feat landed</text>
+
+        <text x="730" y="234" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--accent)" text-anchor="middle">proposes 1.5.1</text>
+        <text x="730" y="440" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--accent)" text-anchor="middle">proposes 1.4.8</text>
+
+        <g stroke="var(--ink-faint)" stroke-width="1.2">
+          <line x1="440" y1="160" x2="620" y2="160"/><line x1="440" y1="155" x2="440" y2="165"/><line x1="620" y1="155" x2="620" y2="165"/>
+          <line x1="270" y1="366" x2="620" y2="366"/><line x1="270" y1="361" x2="270" y2="371"/><line x1="620" y1="361" x2="620" y2="371"/>
+        </g>
+        <text x="530" y="178" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)" text-anchor="middle">range v1.5.0..HEAD</text>
+        <text x="445" y="384" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)" text-anchor="middle">range v1.4.7..HEAD</text>
+
+        <line x1="230" y1="486" x2="1020" y2="486" stroke="var(--rule)"/>
+        <circle cx="238" cy="510" r="6" fill="currentColor"/>
+        <text x="252" y="514" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)">human</text>
+        <circle cx="340" cy="510" r="6" fill="var(--accent)"/>
+        <text x="354" y="514" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)">cicada</text>
+        <line x1="450" y1="510" x2="476" y2="510" stroke="var(--ink-faint)" stroke-width="1.6" stroke-dasharray="5 4"/>
+        <text x="486" y="514" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)">cherry-pick — not a merge, not an ancestor</text>
+      </svg>
+    </div>
+    <figcaption>The <span class="mono">feat:</span> at the left is what took main from 1.4.7 to 1.5.0 &mdash; and <span class="mono">release/1.4</span> was cut from the <span class="mono">v1.4.7</span> tag, so it never contained that feature. Only the <span class="mono">fix:</span> is cherry-picked. The 1.5.0 release cycle itself is elided; it is scenario 1. Two anchors, two ranges, two release PRs, two tags &mdash; from one config file and one fix. The maintenance line anchors on <span class="mono">v1.4.7</span> because that tag is reachable from <em>its</em> HEAD; <span class="mono">v1.5.0</span> is not.</figcaption>
+  </figure>
+
+  <div class="note col">
+    <h3>Why the lines cannot collide here</h3>
+    <p>This is the <strong>trunk-releases</strong> arrangement (#81): <span class="mono">release/1.4</span> was cut only after main had already passed 1.4. So main computes 1.5.1 and the line computes 1.4.8 &mdash; different numbers, by construction. Cutting the branch <em>too early</em>, while main is still shipping 1.4.x, is the misconfiguration that makes both lines compute the same patch; the second one to run hits the collision check.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">02</span><div><h2>What made this need no setup</h2></div></div>
+  <div class="col"><p>Cutting the line was two git commands and nothing else &mdash; no config edit, no flag written onto the branch, no state registered anywhere:</p></div>
+
+  <div class="code col">
+    <div class="code-bar"><span class="f">cutting the maintenance line</span><span class="t">the entire setup</span></div>
+<pre>git checkout -b release/1.4 v1.4.7
+git push -u origin release/1.4</pre>
+  </div>
+
+  <div class="col"><p>That works because every piece of cicada&rsquo;s state already lives <em>inside</em> the branch, and the one thing that could not &mdash; which kind of line this is &mdash; is a pattern rather than a value.</p></div>
+
+  <figure>
+    <div class="svg-frame scroller">
+      <svg viewBox="0 0 1080 430" role="img" aria-label="Comparison of the two branches: the versions file, changelog, anchor tag and range all differ per branch, while cicada.toml is byte-identical on both because branch identity is expressed as a glob pattern.">
+        <g font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600" text-anchor="middle">
+          <text x="560" y="56" fill="var(--ink)">main</text>
+          <text x="850" y="56" fill="var(--ink)">release/1.4</text>
+        </g>
+        <line x1="440" y1="68" x2="680" y2="68" stroke="var(--rule)"/>
+        <line x1="730" y1="68" x2="970" y2="68" stroke="var(--rule)"/>
+
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5" text-anchor="end" fill="var(--ink)">
+          <text x="400" y="134">.cicada-versions.toml</text>
+          <text x="400" y="199">cicada.toml</text>
+          <text x="400" y="264">CHANGELOG.md</text>
+          <text x="400" y="329">anchor tag</text>
+          <text x="400" y="394">commit range</text>
+        </g>
+
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5" text-anchor="middle">
+          <!-- versions file -->
+          <rect x="440" y="108" width="240" height="40" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="560" y="133" fill="var(--ink-soft)">version = "1.5.1"</text>
+          <rect x="730" y="108" width="240" height="40" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="850" y="133" fill="var(--ink-soft)">version = "1.4.8"</text>
+
+          <!-- cicada.toml — one box spanning both columns -->
+          <rect x="440" y="173" width="530" height="40" rx="5" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="705" y="198" fill="var(--accent)">byte-identical on both branches (#82)</text>
+
+          <!-- changelog -->
+          <rect x="440" y="238" width="240" height="40" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="560" y="263" fill="var(--ink-soft)">## 1.5.1 on top</text>
+          <rect x="730" y="238" width="240" height="40" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="850" y="263" fill="var(--ink-soft)">## 1.4.8 on top</text>
+
+          <!-- anchor -->
+          <rect x="440" y="303" width="240" height="40" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="560" y="328" fill="var(--ink-soft)">v1.5.0</text>
+          <rect x="730" y="303" width="240" height="40" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="850" y="328" fill="var(--ink-soft)">v1.4.7</text>
+
+          <!-- range -->
+          <rect x="440" y="368" width="240" height="40" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="560" y="393" fill="var(--ink-soft)">v1.5.0..HEAD</text>
+          <rect x="730" y="368" width="240" height="40" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="850" y="393" fill="var(--ink-soft)">v1.4.7..HEAD</text>
+        </g>
+
+        <g font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)">
+          <text x="996" y="133">branch state</text>
+          <text x="996" y="263">branch state</text>
+          <text x="996" y="328">derived</text>
+          <text x="996" y="393">derived</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Four of the five rows differ per branch because they <em>are</em> the branch. The fifth is the one that would have needed maintaining &mdash; and does not, because <span class="mono">maintenance_branches</span> is a glob matched against the current branch name, not a flag stamped onto it.</figcaption>
+  </figure>
+
+  <div class="note col">
+    <h3>The failure a pattern avoids</h3>
+    <p>A <span class="mono">maintenance = true</span> written onto each branch has to be remembered at every cut, and forgetting it means the guard silently does not apply. Worse, it travels: merging a release branch back into <span class="mono">main</span> &mdash; which the release-branch arrangement <em>requires</em> &mdash; would carry the flag along and quietly make the trunk patch-only.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">03</span><div><h2>cicada.toml</h2></div></div>
+  <div class="col"><p>The whole file, so this scenario stands on its own. It is written once, on <span class="mono">main</span>, and every line cut from it inherits the same bytes &mdash; <span class="mono">release/1.4</span> reads this exact file. Only the two highlighted lines differ from scenario 1.</p></div>
+
+  <div class="code">
+    <div class="code-bar"><span class="f">cicada.toml</span><span class="t">on main &middot; and on every line cut from it</span></div>
+<pre><span class="c"># acme/app — one Rust service, two live lines, no umbrella</span>
+
+[settings]
+<span class="c"># which branches cicada acts on, and what kind of line each is</span>
+<span class="add">release_branches     = ["main", "release/*"]</span>  <span class="c"># the gate (#26)</span>
+<span class="add">maintenance_branches = ["release/*"]</span>          <span class="c"># patch-only lines (#28)</span>
+
+default_scope        = "app"                  <span class="req">&lt;- required</span> <span class="c">unscoped commits land here</span>
+committer            = "cicada[bot] &lt;cicada@users.noreply.github.com&gt;"
+commit_source        = "commits"              <span class="c"># --no-merges; identical on squash/rebase repos</span>
+
+<span class="c"># the release PR cicada opens — its head branch and its title</span>
+release_pr_branch    = "cicada/{branch}"      <span class="c"># renders cicada/release/1.4</span>
+release_pr_title     = "chore(release): {summary}"
+
+<span class="c"># no prerelease_branches — neither line cuts rcs</span>
+
+[forge]
+kind = "github"                              <span class="req">&lt;- required</span> <span class="c">never guessed at release time</span>
+repo = "acme/app"                            <span class="c"># optional — derived from origin when absent</span>
+
+<span class="c"># `bump` decides whether a type justifies a release at all.
+# `title` / `hidden` only decide how it renders.</span>
+[changelog]
+sections = [
+  { type = "feat",  title = "Features",      bump = "minor" },
+  { type = "fix",   title = "Bug Fixes",     bump = "patch" },
+  { type = "perf",  title = "Performance",   bump = "patch" },
+  { type = "docs",  title = "Documentation", bump = "none"  },
+  { type = "chore", title = "Chores",        bump = "none", hidden = true },
+]
+
+[packages.app]                               <span class="req">&lt;- required</span> <span class="c">the package list is explicit, always</span>
+path       = "."
+tag_format = "v{version}"                    <span class="c"># v1.5.1 on main, v1.4.8 on the line — one format, two lines</span>
+changelog  = "CHANGELOG.md"
+
+[[packages.app.updaters]]
+kind = "cargo"
+path = "Cargo.toml"
+
+<span class="c"># no [umbrella] — a single-service repo has no aggregate version to declare</span>
+</pre>
+  </div>
+
+  <div class="two" style="margin-top:26px">
+    <div>
+      <h3>Read these as patterns, not settings</h3>
+      <dl class="kv">
+        <dt>release_branches</dt><dd>Which branches cicada may release from. <span class="mono">main</span> and every <span class="mono">release/*</span>.</dd>
+        <dt>maintenance_branches</dt><dd>Which of those are patch-only. <span class="mono">main</span> does not match, so the guard never applies to it.</dd>
+        <dt>written once</dt><dd>On <span class="mono">main</span>. A branch cut from main inherits both, already correct.</dd>
+      </dl>
+    </div>
+    <div>
+      <h3>The prefix is a namespace, not a label</h3>
+      <dl class="kv">
+        <dt>{branch}</dt><dd>Interpolates <span class="mono">release/1.4</span>, slash and all &mdash; flattening it would map two lines onto one head branch.</dd>
+        <dt>renders</dt><dd><span class="mono">cicada/release/1.4</span> here, <span class="mono">cicada/main</span> on main.</dd>
+        <dt>why <span class="mono">cicada/</span></dt><dd>It matches neither <span class="mono">release/*</span> nor <span class="mono">main</span>. A head of <span class="mono">release/main</span> would land <em>inside</em> the allowlist, so cicada&rsquo;s own push would re-trigger it &mdash; on a branch that is patch-only besides.</dd>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">04</span><div><h2>When the wrong commit is picked</h2></div></div>
+  <div class="col"><p>A maintenance line promises its consumers one thing: only patches. The interesting cases are all the ones where a cherry-pick brings something bigger &mdash; usually because the wrong commit was picked, or because the change belongs on a newer line.</p></div>
+
+  <figure>
+    <div class="svg-frame scroller">
+      <svg viewBox="0 0 1080 560" role="img" aria-label="Three tracks: a cherry-picked fix releases 1.4.8; a cherry-picked feat with maintenance_branches set is refused with exit 4 naming the commit; the same feat without maintenance_branches computes 1.5.0 and is refused as a version collision in Phase A.">
+        <defs>
+          <marker id="m3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ink-faint)"/></marker>
+        </defs>
+
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5">
+          <!-- ================= track A ================= -->
+          <rect x="40" y="36" width="320" height="38" rx="5" fill="var(--surface-2)" stroke="var(--rule)"/>
+          <text x="200" y="60" fill="var(--ink)" text-anchor="middle">cherry-pick a fix:</text>
+          <line x1="200" y1="74" x2="200" y2="96" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#m3)"/>
+          <rect x="40" y="100" width="320" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="200" y="127" fill="var(--ink-soft)" text-anchor="middle">compute bump → patch</text>
+          <line x1="200" y1="144" x2="200" y2="166" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#m3)"/>
+          <rect x="40" y="170" width="320" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="200" y="197" fill="var(--ink-soft)" text-anchor="middle">patch is what the line allows</text>
+          <line x1="200" y1="214" x2="200" y2="236" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#m3)"/>
+          <rect x="40" y="240" width="320" height="58" rx="5" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="200" y="264" fill="var(--accent)" font-weight="600" text-anchor="middle">1.4.8 · released</text>
+          <text x="200" y="283" font-size="10.5" fill="var(--ink-soft)" text-anchor="middle">the guard is silent here</text>
+
+          <!-- ================= track B ================= -->
+          <rect x="380" y="36" width="320" height="38" rx="5" fill="var(--surface-2)" stroke="var(--rule)"/>
+          <text x="540" y="60" fill="var(--ink)" text-anchor="middle">cherry-pick a feat:</text>
+          <line x1="540" y1="74" x2="540" y2="96" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#m3)"/>
+          <rect x="380" y="100" width="320" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="540" y="127" fill="var(--ink-soft)" text-anchor="middle">compute bump → minor</text>
+          <line x1="540" y1="144" x2="540" y2="166" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#m3)"/>
+          <rect x="380" y="170" width="320" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="540" y="197" fill="var(--ink-soft)" text-anchor="middle">branch matches release/*</text>
+          <line x1="540" y1="214" x2="540" y2="236" stroke="var(--warn)" stroke-width="1.4" marker-end="url(#m3)"/>
+          <rect x="380" y="240" width="320" height="58" rx="5" fill="var(--warn-soft)" stroke="var(--warn)"/>
+          <text x="540" y="264" fill="var(--warn)" font-weight="600" text-anchor="middle">exit 4 · refused</text>
+          <text x="540" y="283" font-size="10.5" fill="var(--ink-soft)" text-anchor="middle">names every offending commit</text>
+
+          <!-- ================= track C ================= -->
+          <rect x="720" y="36" width="320" height="38" rx="5" fill="var(--surface-2)" stroke="var(--rule)"/>
+          <text x="880" y="60" fill="var(--ink)" text-anchor="middle">same feat:, no guard declared</text>
+          <line x1="880" y1="74" x2="880" y2="96" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#m3)"/>
+          <rect x="720" y="100" width="320" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="880" y="127" fill="var(--ink-soft)" text-anchor="middle">minor → computes 1.5.0</text>
+          <line x1="880" y1="144" x2="880" y2="166" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#m3)"/>
+          <rect x="720" y="170" width="320" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="880" y="191" fill="var(--ink-soft)" text-anchor="middle">tag v1.5.0 exists — but not</text>
+          <text x="880" y="206" fill="var(--ink-soft)" text-anchor="middle">reachable from this branch</text>
+          <line x1="880" y1="214" x2="880" y2="236" stroke="var(--warn)" stroke-width="1.4" marker-end="url(#m3)"/>
+          <rect x="720" y="240" width="320" height="58" rx="5" fill="var(--warn-soft)" stroke="var(--warn)"/>
+          <text x="880" y="264" fill="var(--warn)" font-weight="600" text-anchor="middle">exit 4 · collision</text>
+          <text x="880" y="283" font-size="10.5" fill="var(--ink-soft)" text-anchor="middle">caught in Phase A, before any PR</text>
+        </g>
+
+        <!-- escape hatch strip -->
+        <rect x="40" y="330" width="1000" height="62" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-dasharray="5 4"/>
+        <text x="62" y="356" font-family="Bricolage Grotesque, sans-serif" font-size="12" font-weight="700" letter-spacing="1.2" fill="var(--accent)">THE ESCAPE HATCH</text>
+        <text x="62" y="378" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">cicada release-pr --release-as app=1.4.8   →   the guard never fires: Release-As bypasses bump computation entirely</text>
+
+        <!-- counterfactual strip -->
+        <rect x="40" y="416" width="1000" height="110" rx="6" fill="var(--warn-soft)" stroke="var(--warn)"/>
+        <text x="62" y="444" font-family="Bricolage Grotesque, sans-serif" font-size="12" font-weight="700" letter-spacing="1.2" fill="var(--warn)">WHAT A CLAMP WOULD HAVE DONE INSTEAD</text>
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">
+          <text x="62" y="470">the feat ships quietly as 1.4.8 — a patch number carrying a feature, with no signal anywhere</text>
+          <text x="62" y="490">with feat!: it is worse: a consumer pinned to ~1.4.0 takes a breaking change on a patch upgrade</text>
+          <text x="62" y="510">this is precisely the harm the whole staleness model exists to prevent (#33) — so #28 refuses instead</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>The guard is a guard, not a clamp. Both failure tracks end at exit 4, but the middle one is the good error: it names the commits, while the collision on the right only reports a number that is already taken.</figcaption>
+  </figure>
+
+  <div class="note col">
+    <h3>It surfaces before the merge, too</h3>
+    <p><span class="mono">cicada check --base release/1.4 --head &lt;pr-head&gt;</span> reports the same problem at exit <span class="mono">3</span> while the pull request is still open &mdash; so the wrong cherry-pick is caught at review time rather than at release time.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">05</span><div><h2>What does not travel</h2></div></div>
+  <div class="col"><p>Nothing changelog-shaped crosses between the two lines, in either direction. Going <em>down</em> &mdash; from main to the maintenance branch &mdash; that is not a rule cicada enforces. It falls out of which commit holds what.</p></div>
+
+  <figure>
+    <div class="svg-frame scroller">
+      <svg viewBox="0 0 1080 440" role="img" aria-label="On main the release cycle produces two commits: the human's fix commit touching only source, and cicada's release commit touching the changelog, Cargo.toml and the versions file. Cherry-picking the fix brings only the source file; the release commit is never picked, so main's changelog entry cannot travel.">
+        <defs>
+          <marker id="m5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+
+        <text x="60" y="30" font-family="Bricolage Grotesque, sans-serif" font-size="12" font-weight="700" letter-spacing="1.2" fill="var(--ink-faint)">ON MAIN, ONE RELEASE CYCLE LEAVES TWO COMMITS</text>
+
+        <!-- human commit -->
+        <rect x="60" y="48" width="460" height="150" rx="6" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="82" y="76" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600" fill="var(--ink)">c9 · fix: reject empty auth header</text>
+        <text x="82" y="95" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)">written by a human</text>
+        <line x1="82" y1="108" x2="498" y2="108" stroke="var(--rule)"/>
+        <text x="82" y="132" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">touches</text>
+        <text x="170" y="132" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink)">src/auth.rs</text>
+
+        <!-- cicada commit -->
+        <rect x="560" y="48" width="460" height="150" rx="6" fill="var(--surface)" stroke="var(--accent)"/>
+        <text x="582" y="76" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600" fill="var(--accent)">R1 · chore(release): v1.5.1</text>
+        <text x="582" y="95" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)">written by cicada</text>
+        <line x1="582" y1="108" x2="998" y2="108" stroke="var(--rule)"/>
+        <text x="582" y="132" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">touches</text>
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink)">
+          <text x="670" y="132">CHANGELOG.md</text>
+          <text x="670" y="152">Cargo.toml</text>
+          <text x="670" y="172">.cicada-versions.toml</text>
+        </g>
+
+        <!-- arrows -->
+        <line x1="290" y1="198" x2="290" y2="288" stroke="currentColor" stroke-width="1.8" marker-end="url(#m5)"/>
+        <text x="304" y="240" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink)">git cherry-pick c9</text>
+        <text x="304" y="257" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)">this is the one you pick</text>
+
+        <line x1="790" y1="198" x2="790" y2="288" stroke="var(--ink-faint)" stroke-width="1.5" stroke-dasharray="5 4"/>
+        <g stroke="var(--warn)" stroke-width="2.2">
+          <line x1="778" y1="231" x2="802" y2="255"/>
+          <line x1="802" y1="231" x2="778" y2="255"/>
+        </g>
+        <text x="818" y="240" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">never cherry-picked</text>
+        <text x="818" y="257" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)">nobody has a reason to</text>
+
+        <!-- landing bar -->
+        <rect x="60" y="292" width="960" height="58" rx="6" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="540" y="316" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--accent)" text-anchor="middle">release/1.4 receives src/auth.rs — and nothing else</text>
+        <text x="540" y="336" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)" text-anchor="middle">its own CHANGELOG.md is written here, by cicada, at its own release</text>
+
+        <!-- caveat -->
+        <rect x="60" y="370" width="960" height="56" rx="6" fill="var(--warn-soft)" stroke="var(--warn)"/>
+        <text x="82" y="394" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--warn)">if you do pick R1 by mistake, it fails loudly rather than silently:</text>
+        <text x="82" y="412" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-soft)">the versions file here would then read 1.5.1, and tag v1.5.1 is not reachable from this branch → exit 1</text>
+      </svg>
+    </div>
+    <figcaption>The separation is structural, not a rule. A human&rsquo;s commit carries source; cicada&rsquo;s carries the changelog and the version files. Cherry-picking moves the first and never the second, so main&rsquo;s entry has no route onto the maintenance line.</figcaption>
+  </figure>
+
+  <div class="col" style="margin-top:30px">
+    <p>Going <em>up</em> is the mirror image, and it is the one that surprises people: <span class="mono">main</span>&rsquo;s <span class="mono">CHANGELOG.md</span> never mentions 1.4.8 either. That entry was written on <span class="mono">release/1.4</span>, in a commit that stays there.</p>
+    <p>This direction is accepted rather than fixed. Merging changelogs across release lines means reconciling independently-written files with no common ancestor for the new entries &mdash; a conflict generator. Each branch&rsquo;s changelog describes that branch, which is arguably the correct reading anyway.</p>
+  </div>
+
+  <div class="two" style="margin-top:8px">
+    <div class="code">
+      <div class="code-bar"><span class="f">CHANGELOG.md</span><span class="t">on main</span></div>
+<pre>## 1.5.1
+### Bug Fixes
+* reject empty auth header
+
+## 1.5.0
+<span class="c">…</span></pre>
+    </div>
+    <div class="code">
+      <div class="code-bar"><span class="f">CHANGELOG.md</span><span class="t">on release/1.4</span></div>
+<pre>## 1.4.8
+### Bug Fixes
+* reject empty auth header
+
+## 1.4.7
+<span class="c">…</span></pre>
+    </div>
+  </div>
+
+  <div class="col" style="margin-top:14px">
+    <p>The same fix, two entries, two version numbers, two tags, two forge releases &mdash; and the two branches never reference each other. That independence is the entire point: it is what lets a maintenance line exist without any coordination mechanism at all.</p>
+  </div>
+</section>
+
+<footer>
+  <hr class="rule" style="margin-bottom:20px">
+  scenario 2 · derived from docs/design.md §Maintenance branches, §Release arrangements, and docs/scenarios/single-service.md group G
+</footer>
+
+</div>

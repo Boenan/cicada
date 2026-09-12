@@ -9,12 +9,17 @@ next* and *what is easy to get wrong*.
 
 | | |
 |---|---|
-| **Design** | Complete. `docs/design.md`, 72 numbered decisions, every section walked and argued through |
-| **Deferred scope** | `docs/future-work.md`, 10 items, each with why it was deferred and what would trigger it |
+| **Design** | Complete. `docs/design.md`, 85 numbered decisions, every section walked and argued through |
+| **Behavioural coverage** | `docs/scenarios/single-service.md` — ~130 scenarios in five-surface form, doubling as the acceptance suite. Monorepo file not yet written |
+| **Deferred scope** | `docs/future-work.md`, 12 items, each with why it was deferred and what would trigger it |
 | **M0 spike** | **Done and confirmed.** `spikes/yaml-splice`, 15 tests green |
 | **Production code** | **None yet.** `src/main.rs` is still `cargo new` output |
 
 Committed: `docs/`. Untracked: `.gitignore`, `Cargo.toml`, `src/`, `spikes/`.
+
+**The scenario pass rewrote parts of the design.** Decisions #73–#85 all came out of writing expected
+outcomes down, and four earlier decisions were reversed outright — see *Do not re-litigate* below, and note
+that #2, #3, #6, #23 and #28 no longer say what an older reading of this file would suggest.
 
 ---
 
@@ -86,6 +91,12 @@ These are cheap to honour from the start and expensive to retrofit:
 | #71 | `saphyr-parser`'s `Marker::index()` is a **char** index despite its doc comment. Convert to a byte offset, and keep the two non-ASCII regression tests |
 | #68 | Exit codes are a contract: `0` ok (including "nothing to release") · `1` error · `2` usage · `3` check findings · `4` refused |
 | #67 | Unknown config fields are errors |
+| #83 | Defaults are tabulated in §Configuration, not discovered from the source. `release_branches`, `default_scope`, `forge.kind` and each package's `path` and `tag_format` are **required**. The two branch classifiers default to a convention (`maintenance/**`, `prerelease-*`, …) — safe only because they classify branches `release_branches` already admitted, so do not default the gate |
+| #84 | One prerelease line, one identifier. `prerelease_branches` is a glob list and `prerelease_identifier` a scalar — never a per-branch map, which would express a maturity ladder cicada cannot enforce |
+| #75 | `.cicada-versions.toml` is the **only** source of versions. Never read a version back out of `Cargo.toml` or `Chart.yaml` to seed a computation — it breaks #30 and makes `--dry-run` a lie |
+| #2 | The tag is the **only** anchor. No commit SHA is stored anywhere. A missing tag is a hard error, never a fallback |
+| #78 | The staleness recomputation runs **only** when a tag is about to be created. Unconditionally it fires on every ordinary push after a release |
+| #82 | Branch-*identity* settings are glob patterns matched against the current branch name, never scalars living on the branch. A scalar travels through a merge-back and silently reconfigures the target branch |
 
 ---
 
@@ -94,24 +105,51 @@ These are cheap to honour from the start and expensive to retrofit:
 Each looks arguable and was argued, at length. The reasoning is in `docs/design.md`; re-opening without new
 information just costs a session:
 
-- **Anchor = tag derived from version, SHA as fallback, descendant check not equality** (#2, #3). Equality
-  was the original design and was a bug — the SHA is recorded pre-merge, the tag lands on the merge commit.
+- **The tag is the only anchor** (#2, #3). The versions file holds a version and nothing else. The SHA
+  fallback and the descendant check are *gone* — the fallback silently continued with a wrong range, and the
+  descendant check has been replaced by "reachable from HEAD", which needs no stored state and reuses #9's
+  primitive. A missing tag is a hard error naming the repair.
+- **Tagging is mandatory** (#6). `tagging = false` was removed: with no tag there is no anchor, and both
+  forges hang release objects off a tag anyway.
 - **Release detection by tag reconciliation, never commit messages** (#9). Immune to squash-merge and
   rewritten messages. Tag and release object reconcile *independently* (#56), or self-healing breaks.
 - **Phase B before Phase A** (#35). The reverse re-releases just-merged work every cycle.
 - **Scope-based attribution, unknown scope is a hard error** (#11). Blast radius is declared by the author;
   this is why dependency-graph propagation is a permanent non-goal rather than a deferral.
 - **Three-layer staleness model** (#32–34). Merging a stale release PR ships commits with no changelog entry
-  and no version effect — a `feat` released under a patch bump, invisibly.
+  and no version effect — a `feat` released under a patch bump, invisibly. Layer 3 is now **recomputation**,
+  not a stored SHA: replan from the previous tag and refuse if the recorded version is *lower* than the
+  recomputed one. The comparison is deliberately one-sided, because over-bumping (`Release-As`, a hand-edited
+  versions file) is a supported workflow.
+- **The maintenance guard is a guard, not a clamp** (#28). A computed bump above patch on a
+  `maintenance_branches` line is a hard error, not a silently reduced version. Clamping is precisely the harm
+  #33 exists to prevent, and worst for `feat!:` — a breaking change delivered on a patch upgrade.
+- **No `cicada init`** (future-work §12). Config authoring is a human job; scanning is opinion that has to be
+  reviewed line by line anyway. `check` does the validation `init` used to warn about.
 - **Prerelease is branch-level, `version` stays the last stable** (#59–61). Anything else breaks the anchor.
 
 ---
 
 ## Still open
 
-One item, non-blocking: whether `cicada init` should ever propose a `next` branch stanza for prereleases.
-Current answer is no — it emits a commented-out `prerelease` line, because a prerelease workflow is a
-deliberate choice and not something to infer from a repo scan.
+Five, all non-blocking and all recorded in `docs/scenarios/single-service.md` §Deltas:
+
+1. **`check`'s title mode.** §`cicada check` routes it through `commit_source = "title"`, which contradicts
+   that setting's own enum (`commits` | `merges` | `both`) and is meaningless for history reading. It belongs
+   on the existing `--title` flag.
+2. **`{summary}` in `release_pr_title`** has no defined rendering, for one package or for many.
+3. **A derived chart bump on a never-released chart** (#22 meeting #37) lands on `0.0.1`, an odd first chart
+   version. `0.1.0` or requiring `initial_version` are the alternatives.
+4. **A promoted prerelease line is stale until `main` is merged back** (F9). The `prerelease` key is deleted
+   by a commit on `main`, so the line still reads `version = "1.4.2"`, `prerelease = "1.5.0-rc.2"` and cuts
+   `1.5.0-rc.3` — an rc for a version already shipped, sorting below it. No guard fires. Either accept it and
+   document the merge-back, or extend #9's reachability primitive from the tag being created to the computed
+   stable base.
+5. **`from` on a first release in `--json`** (delta 15): `null`, absent, or `"0.0.0"`. A machine interface
+   with a compatibility promise (#69) should not leave this to the implementation.
+
+Two smaller ones on `Release-As:` — whether a prerelease value is legal there outside the §Prereleases flow,
+and whether it forces a release when attached to a `bump = "none"` type.
 
 ---
 
@@ -134,7 +172,20 @@ meant to deliver it**, and none was visible from reading the section it lived in
 tracing a full sequence commit by commit. The spike then found a fourth (char-vs-byte indexing) that all the
 ASCII tests passed straight through.
 
-Worth keeping that habit: when a section claims a property, trace the sequence that is supposed to produce it.
+The scenario pass found three more of exactly the same shape, all by tracing rather than reading:
+
+- **The old stale-merge check fired on every normal release.** It compared committer identity over
+  `sha..HEAD`, which after any merge contains the merge commit — whose committer is the forge's web-flow
+  identity, not cicada's. Squash-merge had the same problem. Removing the stored SHA dissolved it.
+- **#34's motivating example did not hold.** "Close the PR after the only `feat:` was reverted" — but a
+  revert does not remove the `feat` from `git log`, so the plan never empties. Revert handling is deferred
+  (future-work §11) and #34's real triggers are config edits.
+- **The prerelease merge-back claim was false.** "Merging `next` into `main` just works because main's config
+  has no `prerelease`" — except the merge brings `next`'s config file along, so main starts cutting rcs. Fixed
+  by #82.
+
+Worth keeping that habit: when a section claims a property, trace the sequence that is supposed to produce
+it. Writing expected outcomes down is the cheapest way to force the trace.
 
 ## Verifying the spike still works
 
