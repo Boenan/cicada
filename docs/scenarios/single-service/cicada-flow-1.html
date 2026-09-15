@@ -526,7 +526,7 @@ commit_source     = "commits"                 <span class="c"># --no-merges; ide
 
 <span class="c"># the release PR cicada opens — its head branch and its title</span>
 release_pr_branch = "cicada/{branch}"         <span class="c"># the PR's HEAD; base is the branch above</span>
-release_pr_title  = "chore(release): {summary}"
+release_pr_title  = "chore(release): prepare release"
 
 <span class="c"># Branch *identity* is declared as patterns, never as a flag living on the branch.
 # This repo has neither kind of line yet; both are shown for shape.
@@ -583,9 +583,9 @@ path = "Cargo.toml"
     </div>
   </div>
 
-  <div class="note open col">
-    <h3>Still undecided in the design</h3>
-    <p><span class="mono">{summary}</span> in <span class="mono">release_pr_title</span> has no defined rendering yet — for one package or for many. The figures above assume <span class="mono">chore(release): v1.5.0</span>. It is one of the three items still open in <span class="mono">docs/design.md</span>.</p>
+  <div class="note col">
+    <h3>The title is the same on every release PR</h3>
+    <p><span class="mono">release_pr_title</span> is a plain string with no interpolation (#86), so this PR and the next one are both titled <span class="mono">chore(release): prepare release</span>. That is safe rather than confusing: the upsert has always keyed on the head branch and never the title (#77), and the body carries the full notes. It does cost a reviewer scanning a PR list the proposed version &mdash; rendering one into the title is <span class="mono">docs/future-work.md</span> &sect;16.</p>
   </div>
 </section>
 

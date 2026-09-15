@@ -57,7 +57,7 @@ default_scope     = "app"
 committer         = "cicada[bot] <cicada@users.noreply.github.com>"
 commit_source     = "commits"
 release_pr_branch = "cicada/{branch}"
-release_pr_title  = "chore(release): {summary}"
+release_pr_title  = "chore(release): prepare release"
 
 [forge]
 kind = "github"
@@ -177,7 +177,6 @@ exists and is reachable from HEAD.
 | B11 | `1.4.2` | `feat:` , branch matches `maintenance_branches` | **error**, exit `4` | the guard refuses rather than clamping (#28) |
 | B14 | `1.4.2` | `feat!:` , branch matches `maintenance_branches` | **error**, exit `4` | the case a clamp handled worst — a breaking change on a patch upgrade |
 | B15 | `1.4.2` | `fix:` , branch matches `maintenance_branches` | `1.4.3` | the guard is silent in the normal case |
-| B16 | `1.4.2` | `feat:` + `--release-as app=1.4.8` , branch matches `maintenance_branches` | `1.4.8` | `Release-As` bypasses bump computation, so the guard never sees a computed bump |
 | B12 | `1.4.2` | `feat(app):` | `1.5.0` | explicit scope ≡ unscoped in shape 1 (Q2) |
 | B13 | `1.4.2` | `feat(parser):` | **error** | unknown scope is fatal (#11); `check` exits `3` with *did you mean 'app'?* |
 
@@ -185,6 +184,12 @@ exists and is reachable from HEAD.
 batch of twenty, "a `feat:` is present" is not actionable. Assert the message lists each commit that
 contributed above patch. B15 is the assertion that matters most in practice: a maintenance branch doing its
 ordinary job must never see this error.
+
+**B17 · there is no way through the guard** (#39). Assert the negative, because the design used to have an
+escape and no longer does: with a `feat:` in the range on a maintenance line, no flag, footer, or config key
+releases it. Hand-editing `.cicada-versions.toml` to `1.4.8` does not work either — Phase B's staleness guard
+recomputes `1.5.0` and refuses the lower recorded version (J4b). The line stays blocked until the commit
+leaves the range. This is the assertion that stops the escape being quietly reintroduced.
 
 **B13 detail.** The failure surfaces in two places with different codes: `cicada check` reports it as a
 finding (exit `3`, with the suggestion), while `cicada plan`/`release-pr` hard-error on it (exit `1`). Both
@@ -237,6 +242,12 @@ strategy is a headline claim.
 
 **C7 · rebase-merge.** Same assertion as C6.
 
+**C9 · auto-merged release PR (#92).** The PR from C1 is merged by the forge's auto-merge rather than by a
+human. Assert Phase B's behaviour is **byte-identical to C2** — it reconciles a tag against HEAD and never
+asks who merged, or whether a PR existed at all. This is the assertion that makes "cicada always opens a PR"
+compatible with continuous deployment: the gate is the repo's, the artifact is cicada's. Assert also that no
+forge call inspects merge authorship, which would reintroduce the forge state #9 removed.
+
 **C8 · anchor missing between merge and Phase B.** After the merge at C2 but *before* Phase B has run, a
 developer runs `cicada plan` locally. The versions file says `1.5.0`; tag `v1.5.0` does not exist yet →
 **hard error**, exit `1`, naming the tag and asking whether `cicada release` has run on this branch. There
@@ -266,13 +277,20 @@ hard error naming both, exit `4`. No tag, no release. Main is left merged-but-un
 deliberate trade: a visible unreleased state beats an invisible mis-versioned release.
 
 **D4b · the guard is one-sided.** Same setup, but the recorded version is *higher* than the recomputation —
-a `Release-As: 3.0.0`, or a hand-edited versions file. The guard passes: over-bumping is a supported
-workflow, under-bumping is the harm (#33). Assert no error.
+a hand-edited versions file naming `3.0.0`. The guard passes: over-bumping is a supported workflow,
+under-bumping is the harm (#33). Assert no error.
 
 **D4c · what the guard does not catch.** PR proposes `1.5.0` from a `feat:`; a stale `fix:` lands before the
 merge. Replanning still yields `1.5.0`, so the guard passes and the fix ships with no changelog entry. The
 version is correct, the notes are one line short. Accepted: catching it would require recording the commit
 the changelog covers, which is the state #2 deliberately removed. Layers 1 and 2 are what prevent it.
+
+**D5d · a scheduled run with nothing to release.** `cicada run` fired by cron rather than by a push, on a range
+holding only `chore(deps):` commits. Outcome is identical to D5a: plan empty, exit `0`, nothing released.
+Assert cicada makes no distinction between a cron-triggered and a push-triggered run — the gate is the branch
+(#26), never the event — and assert that no configuration exists that would make this range release anyway.
+Cadence releases are a permanent non-goal (§Non-goals), and this is the assertion that records it as behaviour
+rather than as an omission someone later "fixes".
 
 **D5a · empty plan, no PR open — the common case.** A `docs:` commit lands on a repo with no open release
 PR. Plan empty → exit `0`. Assert **zero** forge calls, including `find_pull_request`… *or* exactly one, if
@@ -299,26 +317,31 @@ will contain (#43), rendered from the single notes template.
 
 ---
 
-## E · Forced versions
+## E · Human-stated versions
+
+Forced versions are **out of v1 scope** (#39): neither the `Release-As:` footer nor `--release-as` exists.
+The group is kept, and kept short, because the assertions that remain are negative ones — a removed feature
+that nobody asserts the absence of grows back.
 
 | id | given | input | expected |
 |---|---|---|---|
-| E1 | `1.4.2`, computed `1.5.0` | `feat: …` with `Release-As: 2.0.0` footer | `2.0.0` exactly — unscoped applies to `default_scope` (#39) |
-| E2 | `1.4.2` | `--release-as app=2.0.0` | `2.0.0` |
-| E3 | `1.4.2` | two commits, `Release-As: 2.0.0` and `Release-As: 3.0.0` | **hard error**, exit `1` — silent last-wins is a trap |
-| E4 | `1.4.2` | `Release-As: 1.0.0` | **hard error**, exit `1` — a forced version must be strictly greater than the recorded one |
-| E5 | `1.4.2` | `Release-As: 1.4.2` | **hard error** — equal is not greater |
-| E6 | `1.4.2` | `Release-As: 2.0.0-beta.1` | **OPEN — Delta 11**: is a prerelease value legal outside the §F flow? |
+| E1 | `1.4.2`, computed `1.5.0` | `feat: …` with a `Release-As: 2.0.0` footer | `1.5.0` — the footer is **ignored**, not an error; it is an unknown footer like any other |
+| E2 | `1.4.2` | `--release-as app=2.0.0` | exit `2` — unknown flag (clap) |
+| E3 | `1.4.2` | hand-edited versions file → `2.0.0`, pushed | `2.0.0` tagged by Phase B; the one way a human states a version (J4) |
+| E4 | `1.4.2` | hand-edited versions file → `1.0.0` | **hard error**, exit `4` — the staleness guard, not a separate rule (J4b) |
+| E5 | `1.4.2` | hand-edited versions file → `1.4.2` | no-op; the tag already exists and is reachable, so Phase B reports "already tagged" |
 
-**E4/E5 — the monotonicity rule.** One rule covers every way a human can force a version: the `Release-As:`
-footer, `--release-as`, and a hand-edited `.cicada-versions.toml`. The forced value must be **strictly
-greater** than the version cicada currently has recorded, or the run hard-errors naming both. Nothing it
-forbids could be correct: a lower or equal value puts `## 1.0.0` above `## 1.4.2` in the changelog and
-resolves consumers' semver ranges backwards. See J4 for the hand-edited case.
+**E1 is the assertion with teeth.** A repo migrating from release-please will have `Release-As:` footers in
+its history, and a range containing one must plan exactly as if it were absent. Silently honouring it would
+be the worst outcome; erroring on it would make adoption fail on historical commits. Ignoring it is the only
+behaviour that is safe in both directions — and it falls out of the parser reading footers generically and
+acting on `BREAKING CHANGE:` alone (§Commit parsing).
 
-**E1 detail.** `Release-As` bypasses bump computation but not the release decision: a `chore:` commit
-carrying `Release-As: 2.0.0` is still a `bump = "none"` type. Pin whether it forces a release anyway.
-Recommended: yes — an explicit `Release-As` is an unambiguous instruction to release. Folded into Delta 11.
+**Monotonicity now has one subject** (#76). The only human-stated version left is a hand-edited
+`.cicada-versions.toml`, and it must be strictly greater than the number it replaces. E4 asserts that this is
+enforced by the staleness guard's one-sided comparison rather than by a rule of its own — a lower recorded
+version is below the recomputation, which is already an error. Nothing it forbids could be correct: a lower
+value puts `## 1.0.0` above `## 1.4.2` in the changelog and resolves consumers' semver ranges backwards.
 
 ---
 
@@ -379,13 +402,13 @@ created, and nobody has touched `prerelease-v1.5-rc`. Its versions file still re
 
 No existing guard fires. The collision check (#9, #80) inspects the tag cicada is about to create, and
 `v1.5.0-rc.3` is genuinely new. The stale-merge guard (#33, #78) only errors when the recorded version is
-*lower* than the recomputation, and here they agree. **OPEN — Delta 16.**
+*lower* than the recomputation, and here they agree.
 
-Candidates: (a) accept it, and document merging `main` back as the operator's job; (b) extend the #9 primitive
-from the tag being created to the **computed stable base** — refuse when a tag for that base exists in the repo
-and is not reachable from HEAD, which is exactly this situation and reuses machinery that already exists;
-(c) report it in `check` only. A sub-question rides along with (b): with both keys present, which one does the
-staleness guard read as "the recorded version"?
+**Decided: this is accepted behaviour** (#91). cicada acts on what the branch and the config say, and this
+branch says an rc line is open at `1.5.0-rc.2`. Refusing would mean extending the collision check from the tag
+being created to the *computed stable base*, which is machinery added to detect a branch its operator has
+stopped maintaining — and F9b shows the fix costs a fast-forward. Assert the `rc.3` outcome explicitly, as
+behaviour rather than a known bug, so it is not "corrected" later by someone reading it as one.
 
 **F9b · merging `main` back resolves it, and the merge is trivial.** F5 merged `prerelease-v1.5-rc` into `main`, so
 the line's tip is an ancestor of `main` and merging `main` back is a **fast-forward** — there is no conflict on
@@ -393,18 +416,50 @@ the line's tip is an ancestor of `main` and merging `main` back is a **fast-forw
 `version = "1.5.0"` with no `prerelease` key, the anchor resolves to `v1.5.0`, and `c4 feat:` cuts
 `1.6.0-rc.1`. Assert the fast-forward and the reset counter.
 
-**F10 · one line, one identifier (#84).** A repo gets one prerelease line and one identifier;
-`prerelease_branches` is a glob list and `prerelease_identifier` a scalar, so a `beta` line feeding an `rc`
-line is not expressible. Assert the config shape rejects a per-branch mapping, and assert what makes the
-restriction costless: cicada distinguishes identifiers **in no way at all** — `beta` and `rc` share the
-anchor, the base, the counter, the skipped changelog and the `prerelease: true` release object, differing
-only in the string in the version.
+**F10 · one identifier at a time (#84).** `prerelease_identifier` is a scalar, so a `beta` line and an `rc`
+line cannot run **simultaneously** off one repo. Assert the config shape rejects a per-branch mapping, and
+assert what makes the restriction costless: cicada distinguishes identifiers **in no way at all** — `alpha`,
+`beta` and `rc` share the anchor, the base, the counter, the skipped changelog and the `prerelease: true`
+release object, differing only in the string in the version.
+
+**F10d · a line walks the ladder (#93).** The k8s/Node shape, and the reason "one at a time" is not "one
+forever". Given `prerelease_branches = ["release-*"]`, branch `release-1.5`, `version = "1.4.2"`:
+
+| step | config | commits | expected |
+|---|---|---|---|
+| 1 | `prerelease_identifier = "alpha"` | `c1 feat:` | `1.5.0-alpha.1` |
+| 2 | unchanged | `c2 fix:` | `1.5.0-alpha.2` |
+| 3 | edited to `"beta"`, committed | `c3 fix:` | `1.5.0-beta.1` — **counter resets** (#63) |
+| 4 | edited to `"rc"`, committed | `c4 fix:` | `1.5.0-rc.1` — resets again |
+| 5 | merged to `main` | — | `1.5.0`, one changelog entry containing `c1`–`c4` |
+
+Assert the base is `1.5.0` at every step — the notes stay cumulative from `v1.4.2` throughout (#61), which is
+what makes step 5's single entry complete. Assert the counter resets in steps 3 and 4 and **does not** produce
+`beta.3` / `rc.4`: with only the base considered, an unchanged base would increment, and #85 would not catch it
+because `beta.3` sorts above `alpha.2`. This is the assertion the whole two-axis rule exists for.
+
+**F10e · the ladder must sort upward (#85, #94).** Three edits against an open `1.5.0-beta.2`:
+
+| edited to | sorts | expected |
+|---|---|---|
+| `rc` | up | `1.5.0-rc.1` |
+| `alpha` | down | **hard error**, naming `1.5.0-alpha.1` and `1.5.0-beta.2` |
+| `preview` | down (`p` > `b`) | **hard error** — the case that looks like a legitimate ladder and is not |
+
+Assert also that no config key accepts an ordered list of stages: a declared order would make row 3 legal in
+cicada while the published versions still sorted the other way, and consumers resolve with semver (#94).
+
+**F10f · the identifier travels through a merge, and the next line inherits it.** After F10d step 5, `main`'s
+`cicada.toml` carries `prerelease_identifier = "rc"` — inert there, since `main` matches no prerelease pattern
+(#82). Assert that a new line cut from `main` therefore starts at `rc`, **not** `alpha`, and that cutting it at
+`alpha` requires editing the value back. Asserted because it looks like a bug and is the direct consequence of
+the identifier being ordinary config rather than branch state.
 
 **F10b · the identifier cannot be walked downwards (#85).** `1.5.0-rc.2` is open and a developer edits
-`prerelease_identifier` from `rc` to `beta`. The computed `1.5.0-beta.3` sorts *below* the `1.5.0-rc.2` that
+`prerelease_identifier` from `rc` to `beta`. The computed `1.5.0-beta.1` sorts *below* the `1.5.0-rc.2` that
 already shipped, so the run **hard-errors**, naming both versions. This is #76's monotonicity rule applied to
-a computed version rather than a forced one. The reverse edit — `beta` to `rc` — is strictly greater and
-passes: tightening a line's name toward release is legal, loosening it is not.
+a computed version rather than a forced one, and it is the **only** rule governing a maturity ladder (#93) —
+cicada never learns that `beta` follows `alpha`, only that versions must go up.
 
 **F10c · two prerelease branches, one identifier.** `prerelease-v1.5-rc` and `prerelease-v2.0-rc` both match
 the list, as two maintenance branches both match `release/*`. Each carries its own `prerelease` key and its
@@ -442,8 +497,9 @@ trap:
 carrying any prerelease field ranks below the same version without one, and the counter compares numerically
 so `rc.10` follows `rc.9`. Neither property is configured or enforced by cicada — both fall out of the `semver`
 crate, which is why the stable tag can never collide with the rcs that preceded it. The ordering *between*
-different identifiers is the same ASCII accident (`beta` < `rc`), which is why #85 checks monotonicity rather
-than trusting the identifier to be chosen well.
+different identifiers is the same ASCII accident (`beta` < `rc`) — which is exactly why a staged line (F10d)
+gets its ordering from #85 rather than from a declared ladder (#94), and why F10e's `preview` → `beta` is
+refused despite reading like a sensible progression.
 
 ---
 
@@ -461,8 +517,10 @@ unchanged.
 forge call is made. The config is byte-identical to `main`'s — `main` simply does not match the pattern
 (#82), so cutting the branch required no config commit.
 
-**G2b · resolving it.** The operator decides the feature does belong on this line and re-runs with
-`--release-as app=1.4.8`. The guard does not fire, because `Release-As` bypasses bump computation.
+**G2b · there is no resolving it inside cicada** (#39). The operator decides the feature does belong on this
+line — and cicada offers nothing. Assert that the error text says so and names the two real answers: put the
+change on a newer line, or re-do the cherry-pick as the fix it is. Asserted on the *message* rather than the
+behaviour, because a blocked pipeline with no stated way forward is how an escape hatch gets reintroduced.
 
 **G2c · caught before merge.** `cicada check --base release/1.4 --head <pr-head>` on a PR targeting the
 maintenance branch reports the same problem at exit `3`, so it surfaces at review time rather than at release
@@ -487,27 +545,26 @@ exists unreachably never passes through Phase A. Phase B catches it at tag time,
 `release/1.4` cut after main reached `1.5.0`. A fix on each line releases `1.5.1` and `1.4.8` independently,
 no collision. Assert the two branches' versions files and changelogs never reference each other.
 
-**G7 · release-branch arrangement (#81).** `release_branches = ["release/*"]` — main excluded. A push to main
-exits `0` quietly (H1). `release/1.4` releases `1.4.1`. Assert main's `.cicada-versions.toml` is never
-written.
+**G7 · a trunk excluded from the gate still exits quietly.** `release_branches = ["release/*"]` with main
+absent: a push to main exits `0` before any config-dependent work (H1), and main's `.cicada-versions.toml` is
+never written. This is the *gate* behaving correctly, not the release-branch arrangement — that arrangement is
+deferred (#81, future-work §14), because a new line's opening minor has no way to be stated once #39 is gone.
+Assert the gate; do not assert a release from such a line.
 
 **G7b · cutting a line needs no config commit (#82).** `release/1.4` is created with
 `git checkout -b release/1.4 v1.4.7 && git push`. Assert cicada acts on it on the very next push — it matches
 both `release_branches` and `maintenance_branches`, both declared once on `main` and inherited by the cut.
 Assert the branch's `cicada.toml` is byte-identical to `main`'s.
 
-**G7c · merging a release branch back carries no branch state.** `release/1.4` is merged into `main` (the
-G9 prerequisite). Assert `main`'s `cicada.toml` is unchanged by the merge, and that `main` does not become
-patch-only. The same assertion for `prerelease-v1.5-rc` → `main`: `main` must not start cutting rcs.
+**G7c · merging a branch back carries no branch state** (#82). `release/1.4` is merged into `main`. Assert
+`main`'s `cicada.toml` is unchanged by the merge, and that `main` does not become patch-only. The same
+assertion for `prerelease-v1.5-rc` → `main`: `main` must not start cutting rcs. This is the case that killed
+the per-branch scalar, and it is asserted on both classifiers because both would have travelled.
 
-**G8 · release-branch arrangement, unmerged branch.** `release/1.5` is cut from main **without** merging
-`release/1.4` back first. Main's versions file still says `1.4.0`, whose tag lives on the diverged
-`release/1.4`. Anchor resolution finds `v1.4.0` unreachable from HEAD → hard error, exit `1` (J2). This is
-the documented constraint of that arrangement, asserted so the error is recognisable rather than mysterious.
-
-**G9 · release-branch arrangement, merged back.** Same as G8 but `release/1.4` was merged into main first.
-`v1.4.1` is now an ancestor of main and of `release/1.5`; the anchor resolves, the range covers main's
-accumulated commits, and the branch computes `1.5.0`.
+**G8 · a tag that is not reachable is a hard error, whatever put it there.** A branch is cut from `main`
+while `main`'s versions file names `1.4.0`, whose tag lives on a diverged branch. Anchor resolution finds
+`v1.4.0` unreachable from HEAD → hard error, exit `1` (J2). Asserted so the error is recognisable rather than
+mysterious: it is the same primitive as the collision check (#9), reported from the other end.
 
 **G5 · divergence is permanent and accepted.** After G1, `main`'s `CHANGELOG.md` never learns about `1.4.8`.
 Asserted as expected behaviour, not a bug (future-work §10).
@@ -575,10 +632,11 @@ default being a dead letter.
 
 **I9 · fork safety.** `check` runs with no token against an untrusted fork's range. Assert zero HTTP.
 
-**I10 · title mode.** Under squash-merge the PR title is the only thing that lands on the default branch, so
-`check` must be able to lint `--title` instead of the commits. The design routes this through
-`commit_source = "title"`, which contradicts that setting's own enum (`commits` | `merges` | `both`) and
-would be meaningless for history reading. **OPEN — Delta 9.**
+**I10 · there is no title mode** (#87). `check` takes a range and nothing else; `--title` does not exist and
+`commit_source` has three values (`commits` | `merges` | `both`), none of them `title`. Assert `--title`
+exits `2` as an unknown flag, and that `commit_source = "title"` is a config parse error under
+`deny_unknown_fields`-equivalent enum validation (#67) rather than a silently accepted value. Linting a
+squash-merge PR title is future-work §15.
 
 ---
 
@@ -684,6 +742,13 @@ start from the real thing rather than from reverse engineering.
 template through `| yaml`. Assert the output parses as YAML. Autoescape is off because the output is
 Markdown and YAML, so the filters carry the whole burden.
 
+**L9 · the entry date is an input, not a clock read (#95).** `cicada release-pr --no-push --date 2026-09-11`
+renders `## 1.5.0 (2026-09-11)`. Assert three things: re-running with the same `--date` on a different day is
+byte-identical; `--dry-run --date X` and `--no-push --date X` produce the identical `Vec<FileEdit>` (#30); and
+the test harness fails the run if core reads a clock at all. The failure this prevents is small but daily — a
+dry-run at 23:59 and the real run at 00:01 writing different changelog entries, which makes "the same
+computation with the write skipped" false for one minute in every 1440.
+
 **L8 · one template, two destinations (#43).** Assert the notes body embedded in the changelog entry and the
 notes body sent to `create_release` derive from the same render — the changelog adds only the version header
 and the marker handling.
@@ -701,12 +766,33 @@ Two packages, no umbrella. Established state: `app = 1.4.2` (tag `v1.4.2`), `app
   - plan · `app: 1.4.2 → 1.5.0 (minor)` · `app-chart: 0.9.0 → 0.9.1 (patch, derived)` — the derived bump is
     labelled distinctly from an earned one
   - files · `Cargo.toml` → `1.5.0` · `Chart.yaml` `version` → `0.9.1` and `appVersion` → `"1.5.0"`,
-    **quoted** (#51) · two changelogs, each containing only its own package's commits · versions file updates
-    both entries
+    **quoted** (#51) · two changelogs, each containing only its own package's commits — the chart's entry is
+    rendered from `derived_from` rather than a range (M1b, #97) · versions file updates both entries
   - git · two tags: `v1.5.0` and `chart-v0.9.1`
-  - forge · two `create_release` calls; **one** release manifest listing both (#42)
+  - forge · two `create_release` calls, in config order (#96); **one** release manifest listing both (#42),
+    embedded in **both** release bodies — this repo declares no umbrella, so there is no summary release to
+    single out, and the manifest is byte-identical in each
 
   This is the only dependency propagation in cicada, and it is *declared* in config, never inferred.
+
+**M1b · a derived release's changelog entry explains itself** (#97). The chart released without receiving a
+single commit, and each changelog holds only its own package's commits (#15) — so `commits` is empty and the
+notes context carries `derived_from = { package = "app", version = "1.5.0" }` instead. The default template
+renders:
+
+```markdown
+## 0.9.1 (2026-09-15)
+
+_Released to track app 1.5.0._
+```
+
+Assert the entry **is** written — skipping it would leave a hole in the chart's changelog where a real tagged
+release was — that the app's commit does **not** appear in it, and that overriding `.cicada/templates/notes.md.j2`
+changes the wording (#47), because the sentence is a template's, not cicada's.
+
+**M1c · earned and derived at once.** M3's range gives the chart its own `feat` *and* a derived bump. Assert
+`commits` is non-empty **and** `derived_from` is set, and that the default template renders the sections
+normally without the tracking line — the entry already explains itself.
 
 **M2 · chart-only change.** `c1 feat(app-chart): add a PodDisruptionBudget` → `app-chart: 0.9.0 → 0.10.0`
 (`pre_major = "minor"` keeps 0.x inside 0.x). `app` is untouched: no bump, no tag, no changelog entry, and
@@ -724,10 +810,17 @@ package it hits.
 the float `1.1`). cicada emits a warning and writes the new value **quoted**. Assert both the warning and the
 quoting.
 
-**M6 · derived bump on a never-released chart.** `app` at `1.4.2` releases `1.5.0`; `app-chart` has **no**
-versions-file entry. A derived `patch` on an unreleased package would give `0.0.1` by the first-release
-table (#37) — a plausible but odd first chart version. **OPEN — Delta 14.** Candidates: `0.0.1` (consistent
-with #37), `0.1.0` (charts conventionally start there), or require `initial_version` and error without it.
+**M6 · a chart cannot reach a derived first release** (#88). `app` at `1.4.2` releases `1.5.0`; `app-chart`
+has **no** versions-file entry. A derived `patch` on an unreleased package would take its version from the
+first-release table (#37) and land on `0.0.1` — a number chosen by `on_tracked_bump`, a config default that
+says nothing about the chart. The case is now unreachable: a package with a `helm` updater must declare
+`initial_version`, so `check` exits `3` naming the package before this can arise, and the chart's first
+release is whatever its author stated. Assert the `check` finding, and assert that with
+`initial_version = "0.9.0"` declared the derived first release is exactly `0.9.0`.
+
+The reason it is required only on `helm` packages: Helm makes `version` **mandatory** in `Chart.yaml`, so the
+number already exists and its author knows it — while cicada cannot read it back, because `Chart.yaml` is an
+output (#75). Config is the only place the two can meet.
 
 **M7 · `on_tracked_bump = "minor"`.** Same as M1 but `app-chart: 0.9.0 → 0.10.0`.
 
@@ -735,8 +828,10 @@ with #37), `0.1.0` (charts conventionally start there), or require `initial_vers
 sit on the same commit. After M2, they diverge: `app`'s range starts earlier than the chart's. Assert one
 `git log` per package with different ranges — the per-package anchor is the whole reason this works.
 
-**M9 · `Release-As` does not cross packages (#39).** `feat(app): … Release-As: 2.0.0` sets `app` to `2.0.0`
-exactly; the chart still takes its configured derived bump (`0.9.1`), not `2.0.0`.
+**M9 · a tracked bump is not a copied version** (#22). `feat(app):` takes `app` from `1.4.2` to `1.5.0`, and
+the chart takes its configured derived bump to `0.9.1` — it does **not** become `1.5.0`. Only `appVersion`
+carries the app's number across; the chart's own version line is independent (#14). Asserted because "tracks"
+reads like "mirrors", and for `appVersion` it does.
 
 **M10 · the guard covers derived bumps too.** On a branch matching `maintenance_branches`, an
 `on_tracked_bump = "minor"` chart dragged by an app release computes above patch → hard error, exit `4`. Assert the message names the chart and
@@ -777,7 +872,9 @@ Three properties follow, each asserted by a scenario above:
 
 Each needs a decision entry or a wording change. Numbered for the discussion, not for the design log.
 
-**Applied to `docs/design.md` as decisions #73–#79, #83–#85.** Five remain open.
+**Applied to `docs/design.md` as decisions #73–#79, #83–#91.** **None remain open** — the last five were
+closed in the scope pass that removed forced versions (#39), and four of them dissolved rather than needing
+a rule.
 
 | # | Delta | Status |
 |---|---|---|
@@ -789,15 +886,18 @@ Each needs a decision entry or a wording change. Numbered for the discussion, no
 | 6 | Phase B skips packages with no versions-file entry. The old second state (entry present, neither tag nor sha resolves) **no longer exists** — there is no sha | **#2**, dissolved |
 | 7 | The staleness guard runs only when a tag is about to be created | **#78** |
 | 8 | `tagging = false` implies no release objects — **dissolved**: tagging is now mandatory, since the tag is the anchor | **#6** |
-| 9 | `commit_source = "title"` contradicts its own enum; `check`'s title mode belongs on `--title` | **OPEN** |
+| 9 | `commit_source = "title"` contradicts its own enum | **#87** — `check` lints a range only; title linting deferred to future-work §15 |
 | 10 | `check` exits `3` for semantic findings, `1` for a config that will not parse | **#79** |
-| 11 | Forced-version monotonicity. Enforced by the staleness guard's one-sided comparison (J4b), not a separate rule. Two sub-questions still **OPEN**: is a prerelease value legal in `Release-As`, and does it force a release on a `bump = "none"` type? | **#76** |
-| 12 | `{summary}` in `release_pr_title` has no defined rendering | **OPEN** |
+| 11 | Forced-version monotonicity, enforced by the staleness guard's one-sided comparison (J4b) rather than a separate rule. Its two sub-questions **dissolved**: forced versions left v1 entirely | **#76**, narrowed to the hand-edited versions file by **#39** |
+| 12 | `{summary}` in `release_pr_title` has no defined rendering | **#86** — the title is a plain string; rendering deferred to future-work §16 |
 | 13 | `find_pull_request` searches open PRs only | **#77** |
-| 14 | Derived bump on a never-released tracked package lands on `0.0.1` | **OPEN** |
-| 15 | `from` on a first release in `--json`: `null`, absent, or `"0.0.0"` | **OPEN** |
-| 16 | A promoted prerelease line keeps a stale `prerelease` key until `main` is merged back, and cuts an rc *below* an already-shipped stable. No guard fires (F9) | **OPEN** |
-| 17 | The counter rule (#63) is silent when the identifier changes under an unchanged base | **dissolved by #84** — one line, one identifier, so the base is the only axis that can change. The remaining case, an identifier *edited* mid-line, is caught by #85 (F10b) |
+| 14 | Derived bump on a never-released tracked package lands on `0.0.1` | **#88** — `initial_version` required on `helm` packages, so the case is unreachable |
+| 15 | `from` on a first release in `--json`: `null`, absent, or `"0.0.0"` | **#89** — `null`, present and explicit |
+| 16 | A promoted prerelease line keeps a stale `prerelease` key until `main` is merged back, and cuts an rc *below* an already-shipped stable. No guard fires (F9) | **#91** — accepted; merging back is the operator's job |
+| 17 | The counter rule (#63) is silent when the identifier changes under an unchanged base | **#93** — reopened when staged prerelease lines came into scope, and answered: the counter resets on a change to the base **or** the identifier. #84's "the base is the only axis" no longer holds, and #85 does not cover it (`beta.3` sorts above `alpha.2`) |
+| 18 | The staleness guard's `prev` could select a prerelease tag, replanning over a possibly-empty range | **#90** — `prev` is stable-only |
+| 19 | Forced versions removed from v1: the maintenance guard loses its escape hatch, and release-branch releases lose the only way to state a line's opening version | **#39**, **#81** — the arrangement is deferred as a unit (future-work §13, §14) |
+| 22 | **What goes in a derived release's changelog entry?** A chart dragged by its tracked app receives no commits, so the body renders empty and the design was silent (M1b). *(20 and 21 live in `monorepo.md`; the numbering is shared across both files.)* | **#97** — the entry is written, and the notes context carries `derived_from` so the default template names the cause. Data, not prose cicada emits |
 
 Two findings came out of tracing the single-service lifecycle commit by commit rather than from reading a
 section, which is the method `docs/next-steps.md` recommends:
@@ -814,8 +914,9 @@ section, which is the method `docs/next-steps.md` recommends:
 ## Coverage against the design
 
 Sections of `docs/design.md` exercised by at least one scenario here: anchor resolution · commit parsing ·
-`commit_source` · `Release-As` · bump computation · first-release table · `pre_major` · the `maintenance` guard ·
-prereleases (all of #59–#63, #84–#85, including promotion) · release manifest · all four updater kinds ·
+`commit_source` · bump computation · first-release table · `pre_major` · the `maintenance` guard ·
+prereleases (all of #59–#63, #84–#85, #93–#94, including promotion and staged `alpha`/`beta`/`rc` lines) ·
+release manifest · all four updater kinds ·
 both addressing modes · YAML
 splice traps · changelog insertion · templates and filters · both phases · staleness (all three layers) ·
 tag reconciliation · independent release reconciliation · version collision · maintenance branches ·
@@ -823,9 +924,15 @@ branch gating · offline modes · exit codes · `--json` schema · chart trackin
 
 **Not exercised here, by construction** — these need more than one service and move to
 `docs/scenarios/monorepo.md`: umbrella aggregation (#10, #15), multi-scope commits (`feat(api,worker):`),
-scope routing across many packages, `Release-As` hitting multiple packages at once, per-package release
-timing divergence at scale, and the Cargo workspace-inheritance trap (#24).
+scope routing across many packages, per-package release timing divergence at scale, and the Cargo
+workspace-inheritance trap (#24).
 
 **Not exercised anywhere yet:** the GitLab adapter's behavioural differences beyond the two asserted
-fallbacks, and forge retry/backoff (#58). `cicada init` is gone — config authoring is a human job
-(future-work §12).
+fallbacks, and forge retry/backoff (#58).
+
+**Out of scope by decision, and asserted as absent rather than untested:** forced versions (#39, group E),
+CalVer and other non-semver schemes (future-work §17),
+release-branch and milestone-line arrangements (#81, G7), `check`'s title mode (#87, I10), and a rendered
+release-PR title (#86). `cicada init` is gone too — config authoring is a human job (future-work §12). Each
+has a negative assertion somewhere above, because a removed feature that nobody asserts the absence of grows
+back.

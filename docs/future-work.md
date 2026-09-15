@@ -137,12 +137,12 @@ quoting assumptions, and `GIT_ASKPASS` behaves differently there.
 
 ## 9. Adoption into repos with existing release history
 
-**Explicit non-goal in v1.** `cicada init` writes `cicada.example.toml` (#23); matching it to an existing
-repo's tags and layout is a one-time human job.
+**Explicit non-goal in v1.** There is no config generation at all (§12); matching `cicada.toml` to an
+existing repo's tags and layout is a one-time human job.
 
-**What a future version could do.** `cicada init --from-existing` reading the newest tag per detected package
-to prefill `.cicada-versions.toml`, and a `release-please-config.json` importer. Both are convenience only —
-the manual path always works, because the versions file is just a version and a SHA.
+**What a future version could do.** Seed `.cicada-versions.toml` from the newest tag per declared package,
+and import a `release-please-config.json`. Both are convenience only — the manual path always works, because
+the versions file is a version and nothing else (#1, #2).
 
 **Trigger:** enough repos being migrated that the manual step becomes the bottleneck.
 
@@ -188,8 +188,10 @@ example. The behaviour still stands, but its realistic triggers are configuratio
 `bump` flipped to `none`, a type renamed out of `sections`, a package removed while its PR is open — not
 reverts. Force-pushing a protected branch is not a trigger worth designing for.
 
-**Workaround today.** `--release-as app=1.4.3`, or a `Release-As:` footer on the revert commit, forces the
-version the author actually wants. The changelog entry still mentions the reverted feature.
+**Workaround today.** There is none inside cicada — forced versions are deferred too (§13). The author's
+options are to reword the revert so the range no longer contains a releasable type, or to accept the release
+and correct the changelog entry by hand. That the workaround got *worse* when §13 was deferred is the reason
+these two entries should be picked up together.
 
 **Trigger:** the first time a released-then-reverted feature ships in a changelog and someone is misled by it.
 
@@ -220,3 +222,144 @@ anyway.
 
 **Trigger:** enough repos being onboarded that hand-writing the config becomes the bottleneck — the same
 trigger as §9, and the two should be built together if either is.
+
+---
+
+## 13. Forced versions (`Release-As:` and `--release-as`)
+
+**Removed from v1 scope, not merely unimplemented.** An earlier design let a human state a version outright:
+a `Release-As: 2.0.0` commit footer applying to that commit's scopes, and a repeatable `--release-as
+pkg=2.0.0` CLI equivalent. Both are gone (#39), and with them the whole notion of a per-commit override.
+
+**What it was doing.** Four jobs, and it is worth being precise about which of them still have an answer:
+
+| Job | Without forced versions |
+|---|---|
+| Escape the maintenance guard for a deliberate `feat:` on a patch-only line | **No answer.** Put the change on a newer line, or re-do the cherry-pick as the fix it is (#28) |
+| Open a new release line at its first, necessarily-minor version | **No answer** — which is why §14 is deferred with it |
+| Reach `1.0.0` from `0.x` | `pre_major = "major"` plus a breaking change — config, not a footer |
+| Cut a release by hand | Hand-edit `.cicada-versions.toml` *upwards*; the staleness guard permits it (J4) |
+
+**Why it needs discussion rather than reinstatement.** The mechanism is easy; its interactions are not, and
+the scenario passes surfaced three that were never settled. Does a forced version bypass *prerelease
+decoration* as well as bump computation — i.e. what does `1.5.0` mean on a branch matching
+`prerelease_branches`? Is a prerelease value (`2.0.0-beta.1`) legal outside the §Prereleases flow? Does a
+forced version force a *release* when attached to a `bump = "none"` type like `chore:`? And monotonicity
+(#76) has to compare against the right field when both `version` and `prerelease` are recorded, or a forced
+stable can sort below an rc that already shipped. Each has a defensible answer; none has a decided one.
+
+**Trigger:** any of §14, a repo needing a deliberate exception to the maintenance guard, or the revert case
+in §11 becoming common enough that hand-correcting the changelog is the bottleneck.
+
+---
+
+## 14. Release-branch releases and terminal milestone lines
+
+**Deferred as a unit** (#81). `main` never releases; every release comes from a branch that owns its own
+version line — `release/1.5` shipping `1.5.0`, `1.5.1`, `1.5.2` — while the trunk only integrates. Istio runs
+exactly this, and the Chrome milestone branches are the same shape, so it is a real arrangement rather than a
+hypothetical one.
+
+**What blocks it is one thing: a line's opening version.** A new line's first release is necessarily a minor
+(`1.4.1` → `1.5.0`), and `release/*` matching `maintenance_branches` means the guard refuses precisely that
+bump. Forced versions were the mechanism for stating it (§13). Hand-editing the versions file does not
+substitute, because the staleness guard refuses a recorded version *below* the recomputation — which is this
+case exactly. Everything else the arrangement needs already works: per-branch state, the collision check, and
+cherry-picking outwards from the integration point.
+
+**What it would take.** Deciding how a line states its opening version. Three candidates, in rough order of
+how much they cost: a narrowed `initial_version` meaning *first release on this line* rather than *first
+release ever*; a guard exception when the computed stable equals the base of an already-open `prerelease`
+(which covers a line that stabilised through rcs, and nothing else); or §13 returning.
+
+A second question rides along, and it is the more interesting one. cicada's classifiers are globs over the
+branch name (#82), so a line that is a prerelease line in March and a supported release line in April has to
+be **renamed** to move between them. That works and costs one `git branch -m`, but neither Istio nor Chrome
+renames — `release-1.25` is `release-1.25` from cut to retirement, and what changes is the kind of release it
+cuts. That is a question about whether the classifier is shaped right, not about whether operators should
+adapt. The obvious alternative — graduating by dropping a `--prerelease` flag — costs offline truthfulness,
+since `cicada plan` run locally on the line would report a stable version unless the developer remembers the
+flag, and that is a stated goal (§Goals 6) rather than an implementation detail.
+
+**Trigger:** a repo that ships milestone lines. Take it together with §13.
+
+---
+
+## 15. Linting a pull-request title
+
+**Deferred because** v1 has no decided semantics for it (#87). Under squash-merge the PR title is the only
+thing that lands on the default branch, so it is the thing a squash-merge repo most wants linted — and
+`check` lints a commit range and nothing else.
+
+An earlier draft routed it through `commit_source = "title"`, which is not a member of that setting's enum
+(`commits` | `merges` | `both`) and would be meaningless for history reading. A `--title <s>` flag was the
+obvious home, but it left real questions: does it lint *instead of* the range or *in addition to* it, and is
+"this repo lints titles" a property of the repo (config) or of the CI wiring (a flag)? A flag with undecided
+semantics is worse than an absent one, so it is absent.
+
+**What it would take.** Deciding those two questions and adding the flag. The lint itself is the conventional
+-commit parser already in `cicada-core`, run over one string — the cheapest part by far.
+
+**Trigger:** a squash-merge repo adopting cicada and wanting the check at review time.
+
+---
+
+## 16. A rendered summary in the release-PR title
+
+**Deferred because** the rendering was never defined (#86). `release_pr_title` is a plain string with no
+interpolation, defaulting to `chore(release): prepare release`, so every release PR carries the same title.
+
+That is safe — the upsert has always keyed on the head branch and never the title (#77), and the PR body
+carries the full notes — but it is a real ergonomic loss: a reviewer scanning a PR list cannot see which
+version is proposed without opening it.
+
+**What it would take.** A defined rendering for `{summary}` in both shapes. For one package the answer is
+obvious (`v1.5.0`); for many it is not, and the candidates each have a cost: the umbrella's version when one
+is declared (right, but only when one is declared), a comma-joined list of `pkg version` pairs in config
+order (accurate, unbounded), or that list truncated after three with `and N more` (bounded, lossy). Forge PR
+titles get elided in list views anyway, which argues for the truncated form.
+
+**Trigger:** the first time someone asks which release a PR is proposing.
+
+---
+
+## 17. Version schemes other than semver
+
+**Deferred because** a second scheme is a second *arithmetic* at minimum, and potentially a second *ordering*
+— and ordering is the substrate under every refusal in the design.
+
+**What it would serve.** CalVer (`2026.9.1`, `2024.1.3`) and build-number versioning (`1234`). For comparison,
+release-please is semver-only too: its six `versioning-strategy` values (`default`, `always-bump-patch`,
+`always-bump-minor`, `always-bump-major`, `service-pack`, `prerelease`) all change which segment is
+incremented, none derives a number from a calendar. CalVer there is reachable only by stating each version by
+hand through `release-as`, or by pinning `always-bump-patch` and rolling the period from a separate workflow.
+
+**Why ordering is the expensive part.** Six separate refusals compare two versions: the collision check
+(#9, #80), hand-edited monotonicity (#76), computed prerelease monotonicity (#85), `prev` selection (#90), the
+staleness recomputation (#33, #78), and prerelease counter ordering (#64). A scheme cicada cannot order is a
+scheme in which each of those either fails or, worse, silently passes.
+
+**What it would take, and the natural narrowing.** A scheme whose output is *semver-shaped* — three numeric
+segments, no leading zeroes — keeps the existing ordering entirely, so only the arithmetic that produces the
+next number changes. That covers `YYYY.MM.MICRO` and `YYYY.MINOR.MICRO` unpadded, and it is a contained piece
+of work: a per-package `versioning` setting, a format with calver.org tokens, and the date threaded into
+`cicada-core` as a value rather than read from a clock (the `LinkStyle` pattern, A2) so that core stays pure
+and `--dry-run` cannot disagree with the run that follows it.
+
+Four things need deciding with it, all surfaced by tracing the sequence rather than reading:
+
+- **Maintenance lines have to pin the period** to the recorded version rather than the date. Without it the
+  computed period differs from the line's on every run, `MICRO` resets, the maintenance guard refuses the
+  period change, and the line can never release again. release-please's `always-bump-patch` workaround has
+  exactly this problem, pushed outside the tool.
+- **Going backwards must be an error.** A skewed CI clock or a release cut from a branch whose period has
+  passed computes a version sorting below the recorded one — #76's rule applied to a third source.
+- **Breaking changes lose their expression.** A calendar carries no compatibility promise, so `pre_major`,
+  the first-release table (#37) and umbrella aggregation (#10, which aggregates bump *kind*) have nothing to
+  say and must be rejected rather than accepted and ignored.
+- **Padded and two-segment forms stay out** (`2026.09.1`, `24.04`), along with `MAJOR`/`MINOR` tokens, which
+  are not derivable without the human-stated version removed in #39.
+
+**Trigger:** a service in scope that versions by calendar. Note the narrow form needs no ordering abstraction
+at all, so it can be taken without reopening §13.
+

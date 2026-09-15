@@ -351,7 +351,7 @@ git push -u origin release/1.4</pre>
 
   <div class="note col">
     <h3>The failure a pattern avoids</h3>
-    <p>A <span class="mono">maintenance = true</span> written onto each branch has to be remembered at every cut, and forgetting it means the guard silently does not apply. Worse, it travels: merging a release branch back into <span class="mono">main</span> &mdash; which the release-branch arrangement <em>requires</em> &mdash; would carry the flag along and quietly make the trunk patch-only.</p>
+    <p>A <span class="mono">maintenance = true</span> written onto each branch has to be remembered at every cut, and forgetting it means the guard silently does not apply. Worse, it travels: promoting a prerelease line merges it into <span class="mono">main</span>, which would carry the flag along and quietly make the trunk patch-only.</p>
   </div>
 </section>
 
@@ -374,7 +374,7 @@ commit_source        = "commits"              <span class="c"># --no-merges; ide
 
 <span class="c"># the release PR cicada opens — its head branch and its title</span>
 release_pr_branch    = "cicada/{branch}"      <span class="c"># renders cicada/release/1.4</span>
-release_pr_title     = "chore(release): {summary}"
+release_pr_title     = "chore(release): prepare release"
 
 <span class="c"># no prerelease_branches — neither line cuts rcs</span>
 
@@ -484,8 +484,8 @@ path = "Cargo.toml"
 
         <!-- escape hatch strip -->
         <rect x="40" y="330" width="1000" height="62" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-dasharray="5 4"/>
-        <text x="62" y="356" font-family="Bricolage Grotesque, sans-serif" font-size="12" font-weight="700" letter-spacing="1.2" fill="var(--accent)">THE ESCAPE HATCH</text>
-        <text x="62" y="378" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">cicada release-pr --release-as app=1.4.8   →   the guard never fires: Release-As bypasses bump computation entirely</text>
+        <text x="62" y="356" font-family="Bricolage Grotesque, sans-serif" font-size="12" font-weight="700" letter-spacing="1.2" fill="var(--accent)">THERE IS NO ESCAPE HATCH &mdash; AND THAT IS THE POINT</text>
+        <text x="62" y="378" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">forced versions are out of v1 scope (#39): put the change on a newer line, or re-do the cherry-pick as the fix it is</text>
 
         <!-- counterfactual strip -->
         <rect x="40" y="416" width="1000" height="110" rx="6" fill="var(--warn-soft)" stroke="var(--warn)"/>

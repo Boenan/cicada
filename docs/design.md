@@ -12,8 +12,10 @@ built in Rust, git-forge agnostic, for monorepos of microservices and single-ser
 5. Shipped CI templates for GitHub Actions and GitLab CI.
 6. **`plan` and `check` run fully offline** — no token, no network, no forge. Releases can be rehearsed
    locally before anything is pushed, and `check` works on untrusted forks where no token exists.
-7. **Deterministic and idempotent** — the same repo state produces the same output, and a second run
-   changes nothing. A constraint on every feature, not an emergent property.
+7. **Deterministic and idempotent** — the same repo state **and the same date** produce the same output, and
+   a second run changes nothing. A constraint on every feature, not an emergent property. The date is in that
+   sentence because changelog entries carry one; it is an explicit input rather than an ambient clock read
+   (#95), so the property holds exactly rather than approximately.
 
 ## Non-goals (v1)
 
@@ -28,6 +30,37 @@ built in Rust, git-forge agnostic, for monorepos of microservices and single-ser
   by the author via multi-scope commits (`feat(auth,api,gateway):`), and the one declared exception is
   Helm `appVersion` tracking (#22).
 - Signed/verified commits (would require a forge-API commit backend; see Future).
+- **Version schemes other than semver.** CalVer and build-number versioning are deferred (future-work §17),
+  which also records the narrow, semver-shaped form that would cost least. Ordering is what every refusal in
+  this design rests on (#9, #76, #85, #90), and a second scheme is a second arithmetic at minimum.
+- **Releasing a range that contains nothing releasable.** Permanent, not deferred — see below.
+
+### Cadence releases: the trigger is yours, the content is cicada's
+
+Worth separating, because most of what "release on a cadence" means already works and the part that does not
+will never be added.
+
+**Running cicada on a schedule needs nothing.** The trigger has never been part of the gate: #26 gates on the
+*branch*, not on the event that started the run. A cron job calling `cicada run` every second Thursday
+releases whatever accumulated since the last release, exactly as a push-triggered run would. So does a human
+running it by hand. Nothing in the design cares which.
+
+**What cicada will never do is release when the range justifies no release** (#36). If the fortnight held only
+`chore(deps):` commits, a scheduled run produces nothing, and that is the correct answer rather than a missing
+feature:
+
+- **There is no number to compute.** A version is a statement about what changed; a range with no releasable
+  change has nothing to say, so cicada would have to *invent* a bump. Inventing is the one thing this design
+  refuses everywhere else — it is the whole argument behind #39, #11 and #66.
+- **The artifact would carry no information.** A release whose changelog is empty is indistinguishable from
+  its predecessor except for the tag, and every consumer that upgrades to it does so for nothing. Publishing
+  noise into a version history is worse than publishing less often.
+- **The honest version of the request is already satisfied.** "We ship on Thursdays" means *we do not ship
+  between Thursdays* — a statement about the trigger, which is yours. It does not mean *we ship even when
+  there is nothing to ship*, which is what the unsupported half would be.
+
+A repo that genuinely wants a version stamped on a schedule regardless of content is asking for calendar
+versioning, not for a scheduled semver release — and that is future-work §17, where it belongs.
 
 ---
 
@@ -76,7 +109,7 @@ adapters cheap instead of a rewrite.
 | 17 | Git via **shelling out to `git`** behind a `GitBackend` trait; `git` is a required runtime dependency |
 | 18 | Auth is **token-only**, always: `--token` or `CICADA_TOKEN`, never persisted, injected via `GIT_ASKPASS` |
 | 19 | Forge selected by explicit flag/config (`--forge github\|gitlab`), since the token is provider-agnostic |
-| 20 | v1 flags: `--dry-run`, `--json`, `--release-as`, `Release-As:` footer, prerelease support |
+| 20 | v1 flags: `--dry-run`, `--json`, prerelease support. **Forced versions are not in v1** (#39) |
 | 21 | cicada releases itself with cicada |
 | 22 | An app release forces a derived bump of any chart tracking it (default `patch`, configurable) |
 | 23 | *(withdrawn — `cicada init` is deferred; see future-work §12. Number retained so earlier references stay valid.)* |
@@ -95,10 +128,10 @@ adapters cheap instead of a rewrite.
 | 36 | Releasable types are config-driven: each changelog section carries `bump = "minor" \| "patch" \| "none"`. `chore`/`docs` are `none`, so cicada itself declines to release |
 | 37 | An unreleased package is treated as `0.0.0` under strict semver: breaking → `1.0.0`, feat → `0.1.0`, fix → `0.0.1`. Thereafter `pre_major = "minor"` keeps 0.x inside 0.x |
 | 38 | `default_scope` names the package that receives unscoped commits — the umbrella in a monorepo, the sole package in a single-service repo |
-| 39 | `Release-As:` applies to the commit's own scopes (unscoped → `default_scope`); two conflicting values for one package is a hard error; CLI form is repeatable `--release-as pkg=version` |
+| 39 | *(withdrawn — forced versions are out of v1 scope. The `Release-As:` footer and `--release-as` are both removed; see future-work §13. Number retained so earlier references stay valid.)* |
 | 40 | History reading: `commit_source = "commits"` (`--no-merges`, default) \| `"merges"` (`--first-parent`) \| `"both"`. Identical on squash/rebase repos; only affects merge-commit repos |
 | 41 | Release PR title defaults to `chore(release): …` — conventional (survives commit linting) and non-releasable (#36) |
-| 42 | One release manifest per run, written to `target/cicada/release-manifest.json` (gitignored) **and** attached to the umbrella's release |
+| 42 | One release manifest per run, written to `target/cicada/release-manifest.json` (gitignored) **and** embedded in **every** release object that run creates. Not the umbrella's alone — `[umbrella]` is optional (#73), so that would leave the manifest with no home in a repo that declares none |
 | 43 | **One** notes template produces the entry body, reused by both the changelog and the forge release; per-target override optional |
 | 44 | Template/output paths resolve from the **repo root**; two updaters writing the same output path is a hard error |
 | 45 | Autoescape **off** (Markdown/YAML output, not HTML); `\| yaml`, `\| json`, `\| md` filters provided for embedding commit text safely |
@@ -113,13 +146,13 @@ adapters cheap instead of a rewrite.
 | 54 | `set_draft` is forge-specific (GitHub field, GitLab `Draft:` title prefix); fallback where unsupported is title prefix + label + a failing `cicada/freshness` status |
 | 55 | Cicada's committer identity is configurable and **stable across versions** — decision #32's guard depends on it |
 | 56 | Phase B reconciles **tag and release object independently**; a tag that exists without a release still creates the release |
-| 57 | Release manifest is embedded in the release body as fenced JSON **and** written to disk; no asset upload in v1 |
+| 57 | Release manifest is embedded in each release body as fenced JSON inside a collapsed `<details>` block **and** written to disk; no asset upload in v1 |
 | 58 | Forge HTTP: retry with backoff on 5xx/429 (honouring `Retry-After`), never on 4xx; errors mapped to actionable text |
 | 59 | Prerelease is **branch-level**, not per-package: `prerelease_branches` is a glob list, exactly like `maintenance_branches`, and `prerelease_identifier` names what its prereleases are called. Plus `--prerelease` for ad-hoc use |
 | 60 | Versions file gains a `prerelease` field; `version` keeps its exact meaning — **last stable release** — so anchor semantics are untouched |
 | 61 | Every release, rc and stable alike, computes from the last **stable** anchor: notes are cumulative and the stable changelog is complete |
 | 62 | Prereleases write version files and cut tags + forge releases, but **never write `CHANGELOG.md`** |
-| 63 | The rc counter increments while the computed base is unchanged; a changed base (`1.5.0` → `2.0.0`) resets it to `.1` |
+| 63 | The prerelease counter increments while the computed base **and** the identifier are unchanged; a change to **either** resets it to `.1` — a changed base (`1.5.0` → `2.0.0`), or a stage change (`alpha.3` → `beta.1`) (#93) |
 | 64 | Prerelease identifiers are free strings with dotted numbering (`1.5.0-rc.1`) — sorts numerically per semver |
 | 65 | Determinism is a **stated goal** (§Goals 7), not an emergent property |
 | 66 | `forge.kind` is **required**, written by a human. cicada never infers it from the remote URL; a missing value errors naming the value it would have detected, ready to paste |
@@ -132,16 +165,28 @@ adapters cheap instead of a rewrite.
 | 73 | `[umbrella]` is **optional**. cicada never assumes an aggregate version; the developer declares one when they want it. A single-service repo has none |
 | 74 | An app and its Helm chart in one repo are **two packages with independent version lines** (#14) — never an umbrella and a child |
 | 75 | `.cicada-versions.toml` is the **sole source of truth** for versions. Version files (`Cargo.toml`, `Chart.yaml`, …) are pure outputs and are never read back to seed a computation |
-| 76 | Any human-forced version (`Release-As:`, `--release-as`, a hand-edited versions file) must be **strictly greater** than the recorded one |
+| 76 | A hand-edited version in `.cicada-versions.toml` must be **strictly greater** than the one it replaces — the only way a human states a version in v1 (#39), and enforced by #33's one-sided comparison rather than a separate rule |
 | 77 | `find_pull_request` searches **open PRs only**; a closed release PR is never reopened. Idempotency rests on the head branch name, not on PR identity |
 | 78 | The stale-merge recomputation runs **only when a tag is about to be created** — never on an ordinary push, where the range legitimately holds new commits |
 | 79 | `check` exits `3` for semantic findings (config or commits) and `1` for a config that will not parse |
 | 80 | The version-collision check (#9) runs in **Phase A as well as Phase B** — a computed version whose tag already exists unreachably refuses to open a PR, rather than failing after review and merge |
-| 81 | Two release arrangements are supported and named — **trunk releases** and **release-branch releases**. cicada has no `release_strategy` setting: the difference is entirely expressed by `release_branches` and `maintenance_branches`, and a preset over existing keys would unlock no behaviour |
+| 81 | v1 supports **one release arrangement: trunk releases** — a releasing trunk plus maintenance lines cut behind it. Release-branch releases (a trunk that never releases, every line owning its own version line) need a way to state a line's opening version, which #39 removed; deferred to future-work §14. cicada still has no `release_strategy` setting: the arrangement is expressed entirely by `release_branches` and `maintenance_branches` |
 | 82 | Branch-*identity* settings are declared as **glob patterns matched against the current branch name** (`release_branches`, `maintenance_branches`, `prerelease_branches`), never as scalar values living on the branch they describe. Config is still read from the current branch (#26) — the patterns make it identical on every branch, so cutting a line needs no config commit |
 | 83 | `release_branches` is **required** — cicada refuses to guess where it may write. The two branch *classifiers* default to a convention instead: `maintenance_branches = ["maintenance/**", "maintenance-*"]` and `prerelease_branches = ["prerelease/**", "prerelease-*"]` with `prerelease_identifier = "rc"`. Safe because they only ever classify branches `release_branches` already admitted. Every default is tabulated in §Configuration, so "what happens if I omit this" is never answered by reading the source |
-| 84 | **One prerelease line, one identifier.** A repo has at most one kind of prerelease in flight; `beta` feeding `rc` is not an arrangement cicada expresses. A prerelease line has one function, so the identifier is a single scalar and not a per-branch mapping — which also removes any precedence rule between patterns. Changing the identifier mid-line is a config edit, guarded by #85 |
-| 85 | A computed prerelease must be **strictly greater** than the open one recorded in the versions file — #76's monotonicity rule applied to computed versions, not only forced ones. It is what catches an identifier edited from `rc` to `beta` mid-line, which would otherwise compute a version sorting *below* what already shipped |
+| 84 | **One identifier at a time.** `prerelease_identifier` is a single scalar, never a per-branch mapping — so two patterns matching one branch need no tie-break and the setting needs no ordered map. It is *at a time*, not forever: the value may move as the line matures (#93). What cicada never expresses is two stages in flight **simultaneously** — a `beta` line and an `rc` line running in parallel off one repo |
+| 85 | A computed prerelease must be **strictly greater** than the open one recorded in the versions file — #76's monotonicity rule applied to computed versions, not only forced ones. It is the **only** guarantee a maturity ladder gets (#93): it permits `alpha` → `beta` → `rc` and refuses `rc` → `beta`, without cicada knowing what any of those words mean |
+| 86 | `release_pr_title` is a **plain string with no interpolation**, defaulting to `chore(release): prepare release`. Every release PR therefore carries the same title, which is safe because the upsert has always keyed on the head branch and never the title (#77). Rendering the proposed version into it is future-work §16 |
+| 87 | `check` lints a **commit range and nothing else**. There is no `--title` flag and no title mode; linting a squash-merge PR title is future-work §15 |
+| 88 | A package with a `helm` updater must declare `initial_version`. Helm requires `version` in `Chart.yaml`, so a chart always has a number its author already knows — cicada neither invents one nor reads `Chart.yaml` back to find it (#75) |
+| 89 | `--json` emits `"from": null` on a first release — present and explicit. `"0.0.0"` is a version that never existed and produces broken compare URLs; omitting the key is ambiguous with an older schema (#69) |
+| 90 | The staleness guard's `prev` is the highest **stable** tag reachable from HEAD below the recorded version. Prerelease tags are never eligible, so a graduating run cannot replan over an empty range |
+| 91 | A prerelease line that outlives its own promotion is the **operator's** to reconcile. cicada acts on what the branch and the config say, so a line still recording an open `prerelease` keeps incrementing its counter; merging the promoted branch back (a fast-forward) is the documented fix |
+| 92 | cicada **always opens a release PR** (#7); there is no direct-commit mode. A repo that wants no review gate **auto-merges** it — a forge setting, not a cicada mode. cicada's job is to produce a reviewable artifact; whether anyone gates on it is the repo's decision |
+| 93 | A prerelease line **moves through stages** (`alpha` → `beta` → `rc`) by editing `prerelease_identifier` on the branch. The scalar is unchanged (#84); what is stated is that its value may move over time, and that this is the only way a maturity ladder is expressed. The counter resets on a stage change (#63) and the ordering is enforced by #85 alone |
+| 94 | cicada takes **no declared ladder** — `prerelease_identifier` is never a list of ordered stages. A declared order could bless a sequence semver disagrees with (`preview` → `beta` sorts *down*), and consumers resolve with semver, not with cicada's config. The published versions are the contract; the config must not contradict them |
+| 95 | The date is an **explicit input** — `--date YYYY-MM-DD`, defaulting to today in **UTC** — threaded into `cicada-core` as data, exactly as the forge adapter supplies `LinkStyle` (A2). It is the only clock cicada reads, and it feeds one thing: the date on a changelog or release-notes entry. Core therefore never reads a clock, and `--dry-run` at 23:59 cannot differ from the run that follows it at 00:01 (#30) |
+| 96 | Within one run, releases are created in **config order (#31), umbrella last**. Deterministic, so the forge-call log is assertable; umbrella last, so its embedded manifest describes work already done rather than work in flight |
+| 97 | A **derived** release (#22) still writes its changelog entry — never skipped. The notes context carries `derived_from` (the package and version that caused it), and the default template renders one line naming the cause when the release has no commits of its own. Core supplies the fact as data; the template decides the words (#46) |
 
 ---
 
@@ -280,7 +325,7 @@ Three layers, each covering the others' gap:
 
 | Layer | Mechanism | Covers |
 |---|---|---|
-| 1. Branch protection | GitHub *"require branches up to date"* / GitLab fast-forward merge. **Repo setting — documented, not enforced by cicada** | The race: main moves and someone merges the PR in the seconds before Phase A regenerates |
+| 1. Branch protection | GitHub *"require branches up to date"* / GitLab fast-forward merge. **Repo setting — documented, not enforced by cicada.** Not optional on an auto-merging repo (§No review gate) | The race: main moves and someone merges the PR in the seconds before Phase A regenerates |
 | 2. Auto-draft | Cicada converts the PR to **draft** + `cicada:stale` + comment whenever it cannot refresh it. Draft PRs are unmergeable on both forges — enforced by the forge, needing no repo config | The sustained case: cicada is blocked from regenerating (human commits, failed computation) |
 | 3. Phase B recomputation | Before creating a tag, Phase B replans from the previous tag; a recorded version **lower** than the recomputed one means the PR was merged stale. Stateless — no SHA is stored | Someone deliberately un-drafted and merged anyway |
 
@@ -290,12 +335,39 @@ repair. That is the correct trade — a visible unreleased state beats an invisi
 Labels and draft state are **outputs for humans and the forge**, never inputs cicada reads back to decide
 anything. Decision #9 is intact.
 
+### No review gate: auto-merge the PR (#92)
+
+cicada always opens a release PR, and there is no mode that commits a release straight onto a branch. A
+continuously-deployed service does not need one: **both forges can merge the PR without a human** — GitHub's
+auto-merge, GitLab's merge-when-pipeline-succeeds. Enable it on cicada's PR and the loop becomes
+
+```
+push to main  →  cicada opens the release PR  →  CI passes  →  the forge merges it
+              →  cicada tags and releases     →  the tag-triggered workflow deploys
+```
+
+with no human in it, one extra CI cycle of latency, and a full record of exactly what shipped. The review
+gate is the repo's decision, not cicada's; what cicada guarantees is that a reviewable artifact exists to
+gate on. A direct-commit mode was considered and rejected on that basis — it would fork the write path and
+the staleness model to remove a step the forge already removes.
+
+Two interactions bite exactly the repo that turns this on, and neither is obvious:
+
+- **Auto-merge plus the CI-trigger footgun is silent.** The default `GITHUB_TOKEN` does not trigger workflows
+  on PRs it creates (§Permissions), so with auto-merge gated on required status checks the checks never
+  start, auto-merge never fires, and the release PR sits open looking perfectly healthy. A PAT or App token
+  is not optional here — it is what makes the loop turn at all.
+- **Staleness layer 1 stops being advisory.** With a human merging, the window between Phase A regenerating
+  and someone clicking merge is minutes and the layer rarely matters. Auto-merge closes the PR the instant
+  checks go green, which may be after main has already moved — precisely the race layer 1 covers. *Require
+  branches up to date* (GitHub) / fast-forward merge (GitLab) must be on.
+
 ### Phase B — `cicada release`
 
 Also runs on every push to a matching branch. **Stateless reconciliation:**
 
 ```
-for pkg in config.packages (+ umbrella, if declared):
+for pkg in config.packages, then umbrella if declared:      # config order, umbrella last (#96)
     if pkg has no entry in the versions file:     # never released — nothing to reconcile
         skip
 
@@ -320,8 +392,9 @@ agrees (layer 3 above):
 
 ```
 staleness_guard(pkg):
-    prev     = highest tag matching pkg.tag_format that is reachable from
-               HEAD and below the recorded version   (none -> first release)
+    prev     = highest STABLE tag matching pkg.tag_format that is reachable
+               from HEAD and below the recorded version  (none -> first release)
+               prerelease tags are never eligible (#90)
     expected = plan(prev..HEAD)[pkg].version
     if recorded_version < expected:
         ERROR: release PR was merged while stale — the recorded version is
@@ -332,10 +405,16 @@ Phase B already has the planner, so this costs a second `git log` and no stored 
 precisely the harm the staleness model exists to prevent: a `feat` shipped under a patch bump, invisibly.
 
 **The comparison is deliberately one-sided.** Only *lower than expected* is an error. A recorded version
-*higher* than the recomputation is a deliberate over-bump — a `Release-As:` footer, or a human hand-editing
-the versions file to cut a release by hand — and both are supported workflows. The same asymmetry enforces
-#76 for free: editing the versions file downwards puts the recorded version below the recomputed one and
-trips this guard without needing a separate check.
+*higher* than the recomputation is a deliberate over-bump — a human hand-editing the versions file to cut a
+release by hand — which is a supported workflow (J4). The same asymmetry enforces #76 for free: editing the
+versions file *downwards* puts the recorded version below the recomputed one and trips this guard without
+needing a separate check.
+
+**`prev` is stable-only** (#90). A prerelease tag can match `tag_format` and sort below the recorded version
+— `v1.5.0-rc.2` does both when the record says `1.5.0` — so an unqualified "highest tag" would anchor the
+recomputation on an rc and replan over a range that may be empty. The guard is one-sided, so it would pass
+either way and the bug would never surface; stating the eligibility rule is what stops it being decided by
+accident.
 
 **The gating matters as much as the check.** Run unconditionally, it would fire on every ordinary push after
 a release: once `v1.5.0` is tagged, the next `fix:` legitimately makes the recomputation say `1.5.1` while
@@ -428,15 +507,17 @@ It deliberately does *not* clamp the version down. #33 justifies the entire stal
 observation that *a `feat` released under a patch bump is worse than a blocked pipeline, because nobody sees
 it* — and a clamp is a config key whose sole function is to do exactly that. Worse for `feat!:`: a consumer
 pinned to `~1.4.0` would take a breaking change on a patch upgrade with no signal in the version number at
-all. Every other ambiguity in cicada is a hard error — unknown scope (#11), conflicting `Release-As` (#39),
+all. Every other ambiguity in cicada is a hard error — unknown scope (#11), duplicate updater output (#44),
 stale merge (#33) — and this was the one place the tool silently answered wrong.
 
-The guard is silent in the normal case: cherry-pick only fixes and it never fires. The escape hatch needs no
-special-casing, because `Release-As:` bypasses bump computation entirely:
+The guard is silent in the normal case: cherry-pick only fixes and it never fires.
 
-```
---release-as api=1.4.8        # yes, I know, do it anyway
-```
+**There is no escape hatch, and that is the point** (#39). An earlier design let `Release-As:` bypass bump
+computation, so "yes, I know, ship it as `1.4.8` anyway" was one footer away. Forced versions are out of v1
+scope, and hand-editing the versions file downwards does not substitute for them — the staleness guard
+catches that too, by design (J4b). So the only answers to a `feat:` on a patch-only line are the two that
+were always the right ones: put the change on a newer line, or re-do the cherry-pick as the fix it actually
+is. A line that promises only patches keeps that promise mechanically rather than by convention.
 
 And because the offending commit is visible in a pull request, `cicada check` reports it **before merge**
 rather than at release time. There is no `max_bump = "patch"` scalar, because patch is the only value that
@@ -444,8 +525,8 @@ was ever meaningful — a string field accepting one string invites `"minor"` an
 
 **Why a pattern rather than a flag on the branch** (#82). A `maintenance = true` written onto each branch has
 to be remembered at every cut, and forgetting it means the guard silently does not apply. It also travels
-through merges: the release-branch arrangement below *requires* merging release branches back into `main`,
-which would carry that flag onto main and quietly make the trunk patch-only. A pattern is identical
+through merges: promoting a prerelease line merges it into `main`, which would carry that flag onto main and
+quietly make the trunk patch-only. A pattern is identical
 everywhere, so a merge-back is a no-op on the config file and cutting a line needs no config commit at all:
 
 ```
@@ -461,10 +542,10 @@ written on the maintenance branch. Merging changelogs across lines is out of sco
 
 ## Release arrangements
 
-Both of the following work today and need no new machinery. They differ only in what is listed in
-`release_branches` — which is why there is no `release_strategy` setting (#81): a preset over existing keys
-would unlock no behaviour, and a wrongly declared one would be worse than none. What they *do* need is
-naming, because their failure modes are completely different.
+**v1 supports one arrangement: trunk releases** (#81). `main` releases the current line; maintenance branches
+serve lines main has already passed. It needs no machinery beyond `release_branches` and
+`maintenance_branches`, which is why there is still no `release_strategy` setting — a preset over two existing
+keys would unlock no behaviour, and a wrongly declared one would be worse than none.
 
 ### Trunk releases
 
@@ -477,49 +558,36 @@ release/1.4     1.4.8 ── 1.4.9            cut after main reached 1.5.0
 ```
 
 ```toml
-release_branches = ["main", "release/*"]
+release_branches     = ["main", "release/*"]
+maintenance_branches = ["release/*"]
 ```
 
 Lines can never collide, because `release/1.4` is only cut once main is past 1.4. Cherry-picks flow from main
-to the older branch. `main` does not match `maintenance_branches`, so the guard never applies to it.
+to the older branch. `main` does not match `maintenance_branches`, so the guard never applies to it — every
+line the guard *does* apply to was cut behind a version main already shipped, so its first release is a patch
+and there is never an opening version to state.
 
 **The failure mode** is cutting the maintenance branch too early — while main is still releasing the same
 line. Both branches then compute the same next patch, and the second one to run hits the collision check
 (#9, #80). That is a misconfiguration, and the error is the correct answer: if main is still releasing 1.4.x,
 the `release/1.4` branch has nothing to do.
 
-### Release-branch releases
+### Why release-branch releases are deferred
 
-`main` is a trunk that never releases. Every release comes from a release branch that owns its line. Fixes
-land on main and are cherry-picked into whichever branches need them.
+The other arrangement in the wild inverts the trunk's role: `main` never releases, and every release comes
+from a branch that owns its own version line (`release/1.5` shipping `1.5.0` onwards). It is what Istio and
+the Chrome milestone branches do, and cicada's branch-identity model expresses the *topology* of it without
+any new machinery.
 
-```
-main         X ─────────── Y ─────────►    never released
-              ╲             ╲
-release/1.4    1.4.0 ── 1.4.1 ╲
-release/1.5                    1.5.0 ──►
-```
+What it cannot express, after #39, is the **first release on a new line**. That release is necessarily a
+minor — `release/1.5` opening at `1.5.0` while the repo's last release was `1.4.1` — and `release/*` matching
+`maintenance_branches` means the guard refuses exactly that bump. Forced versions were the mechanism for
+saying it, and they are out of v1 scope. Hand-editing the versions file does not substitute: the staleness
+guard refuses a recorded version *below* the recomputation, which is precisely this case.
 
-```toml
-release_branches     = ["release/*"]    # main excluded — pushes to it exit 0 quietly (#26)
-maintenance_branches = ["release/*"]
-```
-
-A line's **first** release is necessarily a minor (`1.4.1` → `1.5.0`), which the guard refuses. Cut it with
-`--release-as api=1.5.0`, which bypasses bump computation (#39) — cutting a release line is inherently a
-decision about a version number, so stating one is the honest form. Every release after that is a patch
-computed normally.
-
-**The constraint that will bite silently: release branches must be merged back into `main`.** Cicada never
-writes to main in this arrangement, so main's `.cicada-versions.toml` holds whatever was there when the last
-branch was cut — and the tags live on branches that diverged. Cut `release/1.5` from main without merging
-`release/1.4` back, and its anchor tag `v1.4.1` is not reachable from the new branch, so anchor resolution
-hard-errors (#3). If the versions file is absent entirely, cicada sees a first release and computes `0.1.0`.
-
-Merging each release branch back — what git-flow already prescribes — makes `v1.4.1` an ancestor of main and
-of every branch cut from it, keeps main's versions file current, and lets `release/1.5` anchor correctly and
-compute `1.5.0` from the accumulated features. One consequence to expect: merging `release/1.4` back *after*
-`release/1.5` exists will conflict on `CHANGELOG.md`, which is the divergence recorded in future-work §10.
+So the arrangement is deferred as a unit rather than half-supported (future-work §14). Picking it up means
+deciding how a line states its opening version — a narrowed `initial_version`, a guard exception, or forced
+versions returning — and that decision belongs with §13 rather than ahead of it.
 
 ---
 
@@ -539,7 +607,7 @@ commit_source     = "commits"                    # "commits" (--no-merges) | "me
 
 # the release PR cicada opens — its head branch and its title (#27, #41)
 release_pr_branch = "cicada/{branch}"    # the PR's HEAD; base is whichever branch cicada ran on
-release_pr_title  = "chore(release): {summary}"  # conventional and non-releasable
+release_pr_title  = "chore(release): prepare release"   # a plain string; no interpolation (#86)
 
 # which branches cut prereleases, and what those prereleases are called (#59, #84)
 prerelease_branches   = ["prerelease-v*-rc"]     # a glob list, like maintenance_branches
@@ -570,7 +638,7 @@ sections = [
 path       = "services/api"
 tag_format = "api-v{version}"
 changelog  = "services/api/CHANGELOG.md"
-# initial_version = "1.0.0"   # override the first-release rule (#37)
+# initial_version = "1.0.0"   # override the first-release rule (#37); REQUIRED on helm packages (#88)
 # pre_major       = "minor"   # "minor" (default) | "major" — breaking-change behaviour while on 0.x
 
 [[packages.api.updaters]]
@@ -640,7 +708,7 @@ missing key has to be discovered by experiment is a release tool nobody trusts.
 | `committer` | `cicada[bot] <cicada@users.noreply.github.com>` | Has a default *and* must not drift between versions — #32's guard reads it back |
 | `commit_source` | `"commits"` | `--no-merges`; identical to the alternatives on squash/rebase repos (#40) |
 | `release_pr_branch` | `"cicada/{branch}"` | Outside any plausible `release_branches` glob (#27) |
-| `release_pr_title` | `"chore(release): {summary}"` | Conventional and non-releasable (#41) |
+| `release_pr_title` | `"chore(release): prepare release"` | Conventional and non-releasable (#41); a plain string, no interpolation (#86) |
 | `forge.kind` | **error** | Never inferred from the remote at release time; the error names the value it would have detected (#66) |
 | `forge.api_url` | the public host for `kind` | |
 | `forge.repo` | derived from `origin` | The one forge value that *is* derived, because it cannot be ambiguous |
@@ -651,12 +719,21 @@ missing key has to be discovered by experiment is a release tool nobody trusts.
 | `packages.<id>.changelog` | `<path>/CHANGELOG.md` | |
 | `packages.<id>.updaters` | `[]` | A tag-only package: version, tag and changelog, no file written |
 | `pre_major` | `"minor"` | 0.x stays inside 0.x; reaching 1.0.0 is deliberate (#37) |
-| `initial_version` | the first-release table | breaking → `1.0.0`, feat → `0.1.0`, fix → `0.0.1` (#37) |
+| `initial_version` | the first-release table | breaking → `1.0.0`, feat → `0.1.0`, fix → `0.0.1` (#37). **Required on a package with a `helm` updater** (#88) |
 | `on_tracked_bump` | `"patch"` | The derived bump a chart takes when its tracked app releases (#22) |
 
-**Required means required, and there are five.** `release_branches`, `default_scope`, `forge.kind`, and each
-package's `path` and `tag_format`. Every one of them is a place where a wrong guess is invisible rather than
-noisy — which is the same test #66 and #8 already apply.
+**Required means required, and there are five — six on a chart.** `release_branches`, `default_scope`,
+`forge.kind`, and each package's `path` and `tag_format`, plus `initial_version` on any package carrying a
+`helm` updater (#88). Every one of them is a place where a wrong guess is invisible rather than noisy — which
+is the same test #66 and #8 already apply.
+
+`initial_version` earns its place on charts for a reason specific to Helm: `version` is **mandatory** in
+`Chart.yaml`, so a chart that exists at all already has a number, and its author already knows it. cicada
+must not invent a different one — and it cannot discover the existing one either, because `Chart.yaml` is an
+output and is never read back (#75). The one place the two could meet is config, so that is where it is
+stated. It also dissolves the awkward case a tracking chart otherwise lands in: a *derived* bump (#22) on a
+never-released chart would take its first version from the first-release table, and the size of a derived
+bump comes from `on_tracked_bump` — a config default that says nothing about the chart at all.
 
 **Why the gate cannot be defaulted but the classifiers can.** They are asked different questions.
 `release_branches` asks *may cicada write here at all*, and it is the only setting standing between a push and
@@ -694,6 +771,7 @@ config typos otherwise have is a release that looks fine and is wrong.
 - `app_version.track` names a real package
 - no two packages resolve to the same Cargo version field (#24 — the workspace-inheritance trap)
 - `release_pr_branch` contains `{branch}`, and renders to a ref that matches no `release_branches` pattern (#27)
+- every package with a `helm` updater declares `initial_version` (#88)
 - the five required keys are present (#83); a missing `release_branches` names the current branch as the likely value
 - a branch matching a **defaulted** prerelease pattern does not contradict `prerelease_identifier` (#83, #84)
 
@@ -758,7 +836,6 @@ Hand-written parser rather than an off-the-shelf crate, because of the multi-sco
 feat(api,worker)!: add retry backoff
 
 BREAKING CHANGE: retries are now on by default
-Release-As: 2.0.0
 ```
 
 - `type` — matched against configured changelog sections; unknown types are ignored (not errors).
@@ -780,20 +857,13 @@ on the merge commit (GitLab's default merge message carries the MR title). Hence
 On squash and rebase repos main is linear, so `--no-merges` and `--first-parent` return the identical set —
 the setting is a no-op there, and all three merge strategies work out of the box.
 
-**`Release-As:` in a monorepo** (#39). The footer forces an exact version instead of the computed one:
-
-```
-feat(api): rewrite the storage layer
-
-Release-As: 2.0.0        →  api becomes exactly 2.0.0, not the computed 1.6.0
-```
-
-- It applies to **the commit's own scopes**. `feat(api,worker): … Release-As: 2.0.0` sets *both*, which is
-  rarely intended when their versions differ — scope it narrowly.
-- Unscoped commits apply it to `default_scope`.
-- Two commits in one range forcing **different** versions for the same package is a **hard error**; silent
-  last-wins is a trap.
-- CLI equivalent is repeatable and package-qualified: `--release-as api=2.0.0`.
+**Footers cicada does not act on** (#39). The parser reads footers generically, but v1 acts on exactly one:
+`BREAKING CHANGE:`. A `Release-As:` footer is **not** honoured — forced versions are out of v1 scope
+(future-work §13) — so the version always comes from the commits and the config, never from an instruction
+embedded in one commit. The consequence worth stating plainly: there is no per-commit override anywhere in
+cicada, and the two places a design reflex reaches for one — the maintenance guard (§The maintenance guard)
+and a new release line (§Why release-branch releases are deferred) — are answered by changing what is on the
+branch, not by annotating a commit.
 
 ### Bump computation
 
@@ -815,10 +885,12 @@ only in a CI trigger condition, so `cicada plan` gives the same answer wherever 
 | a feature (`feat(api):`) | `0.1.0` |
 | only fixes | `0.0.1` |
 
-`initial_version` overrides this outright.
+`initial_version` overrides this outright, and is **required** on a package with a `helm` updater (#88).
 
 **Afterwards, `pre_major` governs 0.x.** With the default `"minor"`, a breaking change at `0.3.0` gives
-`0.4.0` — never escaping to 1.0.0 by accident. Reaching 1.0.0 is a deliberate act (`--release-as api=1.0.0`).
+`0.4.0` — never escaping to 1.0.0 by accident. Reaching 1.0.0 is a deliberate act, and with #39 gone the way
+to say it is `pre_major = "major"` plus a breaking change — a statement about the package in config, rather
+than an instruction buried in one commit message.
 Note the first release is a conscious exception: `feat!:` yields `1.0.0` there but `0.4.0` at `0.3.0`, because
 the first release is where you *choose* your entry point and `!` is how you say so without config.
 
@@ -869,9 +941,18 @@ stable changelog is automatically complete. `prerelease` tracks only which rc nu
 deleted when the stable release cuts.
 
 **Counter rule** (#63). Compute the target stable version from commits as usual (`1.4.2` + feat = `1.5.0`),
-then attach `-rc.N`. If the computed base still matches the open prerelease's base, increment N. If the base
-changes — a breaking change arrives and `1.5.0` becomes `2.0.0` — reset to `2.0.0-rc.1`. The awkward case
-handles itself.
+then attach `-<id>.N`. **Two things can reset N, and both are recomputed from scratch every run:**
+
+| What changed | Example | N |
+|---|---|---|
+| nothing | another `fix:` lands | increments — `1.5.0-rc.2` |
+| the base | a `feat!:` arrives, `1.5.0` → `2.0.0` | resets — `2.0.0-rc.1` |
+| the identifier | the line moves `alpha` → `beta` (#93) | resets — `1.5.0-beta.1` |
+
+The identifier axis is the one that is easy to get wrong. With only the base considered, an `alpha.3` line
+moving to `beta` computes an unchanged base, increments, and publishes **`1.5.0-beta.4`** — a counter
+continuing across a stage it never belonged to. It even passes #85, because `beta.4` sorts above `alpha.3`,
+so nothing catches it. Both axes are read from the current run's inputs; nothing is stored.
 
 **Prereleases never touch `CHANGELOG.md`** (#62). If every release wrote a cumulative entry, the file would
 accumulate rc.1, then rc.2 repeating it, then 1.5.0 repeating it again. Instead the changelog contains only
@@ -893,35 +974,62 @@ prerelease_identifier = "rc"
 mechanism as `maintenance_branches` — the same shape, even: a glob list and nothing else. A `--prerelease rc`
 flag covers ad-hoc rcs without a branch, and overrides the identifier when both apply.
 
-### One line, one identifier (#84)
+### One identifier at a time, and how a line changes stage (#84, #93)
 
-A prerelease line has exactly one function: ship the next stable early, under a name that sorts below it. That
-is one job, so a repo gets one line and one identifier. `beta` feeding `rc` is **not** an arrangement cicada
-expresses.
+`prerelease_identifier` is a **scalar, not a map** — and "one at a time" is not "one forever". A line that
+ships `alpha`, then `beta`, then `rc` before it ships `1.5.0` is exactly what Kubernetes and Node do, and
+cicada follows it. What it never expresses is two stages **in flight simultaneously** — a `beta` line and an
+`rc` line running in parallel off one repo, each with its own counter.
 
-This is worth stating because the alternative is easy to build and buys nothing. cicada draws no distinction
-between identifiers whatsoever: `beta` and `rc` anchor the same way, compute the same base, run the same
+**How a line changes stage** (#93). Edit `prerelease_identifier` on the branch and commit it. That is the
+whole mechanism:
+
+```
+prerelease_identifier = "alpha"    c1, c2, c3   →  1.5.0-alpha.1 · alpha.2 · alpha.3
+                       ↓ config edit, committed on the line
+prerelease_identifier = "beta"     c4           →  1.5.0-beta.1        counter resets (#63)
+                       ↓
+prerelease_identifier = "rc"       c5           →  1.5.0-rc.1
+                       ↓ merge to main, which matches no prerelease pattern
+                                   —            →  1.5.0               one changelog entry, all of c1..c5
+```
+
+The base never moved: every one of those computed `1.5.0` from the same stable anchor, so the notes stayed
+cumulative and the stable changelog is complete (#61). Only the label on the pre-release changed, and the
+counter restarted each time it did.
+
+**The config edit is the truthful form; `--prerelease <id>` is the ad-hoc one.** Both work and the flag wins
+where both apply, but they differ in a way that matters: the config edit lives on the branch, so `cicada plan`
+run on a laptop with no arguments reports the stage the line is actually in. A stage that lives only in a CI
+argument makes offline planning lie, and offline truthfulness is a stated goal (§Goals 6).
+
+**The ladder's only guarantee is #85, and that is deliberate** (#94). cicada draws no distinction between
+identifiers whatsoever: `alpha`, `beta` and `rc` anchor the same way, compute the same base, run the same
 counter, skip the same changelog, and produce the same `prerelease: true` release object. The *only* thing
-that differs is the string in the version and the ordering that string implies. A per-branch mapping would
-therefore let a repo express a maturity ladder that cicada does not understand and cannot enforce — the
-ordering between stages would be an alphabetical accident, not a guarantee.
+that differs is the string in the version and the ordering that string implies. So the rule is monotonicity
+and nothing else — each computed prerelease must sort strictly above the one recorded in the versions file:
 
-Collapsing it to a scalar removes real machinery, not just a line of config:
+| Stage change | Sorts | Result |
+|---|---|---|
+| `alpha` → `beta` → `rc` | up (`a` < `b` < `r`) | permitted |
+| `rc` → `beta` | down | **hard error**, naming both versions |
+| `preview` → `beta` | down (`p` > `b`) | **hard error** — a legitimate-looking ladder semver disagrees with |
 
-- **No precedence rule.** With a map, two patterns matching one branch needed a tie-break, and "first in config
-  order wins" is exactly the silent last-wins this design refuses elsewhere (#39, #44). A list has nothing to
-  tie-break.
-- **No ordered-map requirement** for this setting, and no question about whether a TOML table preserves
-  document order.
-- **The counter rule stays complete.** #63 decides increment-versus-reset from the computed base alone. With
-  one identifier the base is the only thing that can change, so there is no second axis for it to be silent
-  about.
+The third row is why `prerelease_identifier` is not a **declared list** of ordered stages (#94). A declared
+order would make `preview` → `beta` legal in cicada while the published versions still sorted the other way
+— and a consumer resolving `>=1.5.0-preview` does so with semver, not with cicada's config. Blessing a
+sequence semver disagrees with would put the tool's opinion above the artifact's contract. Semver's ordering
+is the truth; cicada's job is to refuse the edits that violate it, not to redefine them.
 
-**Changing the identifier mid-line is a config edit, and #85 guards it.** Editing `prerelease_identifier` from
-`rc` to `beta` while `1.5.0-rc.2` is open would compute `1.5.0-beta.3`, which sorts *below* what already
-shipped. So a computed prerelease must be strictly greater than the one recorded in the versions file — #76's
-monotonicity rule, applied to computed versions rather than only forced ones. The reverse edit, `beta` to `rc`,
-is strictly greater and passes: tightening a line's name toward release is legal, loosening it is not.
+The practical consequence for anyone choosing stage names: **pick names that sort upward.** The conventional
+`alpha` / `beta` / `rc` ladder works by a happy ASCII accident, and cicada reports the violation clearly when
+a chosen one does not.
+
+**One papercut worth knowing.** `prerelease_identifier` is ordinary config read from the branch, so it travels
+through a merge like any other line. Promoting a line that reached `rc` merges `prerelease_identifier = "rc"`
+onto `main` — inert there, since `main` matches no prerelease pattern (#82) — but the *next* line cut from
+`main` inherits `rc` and starts there rather than at `alpha`. Reset it when cutting the line if the ladder is
+meant to start from the bottom.
 
 Several prerelease *branches* may match the list at once — `prerelease-v1.5-rc` now, `prerelease-v2.0-rc` next
 quarter — exactly as several maintenance branches may. They share the identifier, and if two of them ever
@@ -957,13 +1065,25 @@ The GitLab adapter marks it in the release name instead. Same class of gap as dr
 **One manifest per run, not per package** (#42). A single run can release three packages independently; what
 deployment needs is the set that shipped together — package, version, tag, the tagged commit, timestamp.
 
-It is written to `target/cicada/release-manifest.json` (gitignored, **never committed**) *and* attached to the
-umbrella's release object. Both, for two reasons: under `--no-push` there is no release object to attach to,
-so the file is the only way to inspect a rehearsal (Goal 6); and the deploy job that runs after the release
-job can read a file in the workspace without a token and an API round trip.
+It is written to `target/cicada/release-manifest.json` (gitignored, **never committed**) *and* embedded in
+**every release object the run creates**. Both, for two reasons: under `--no-push` there is no release object
+at all, so the file is the only way to inspect a rehearsal (Goal 6); and the deploy job that runs after the
+release job can read a file in the workspace without a token and an API round trip.
+
+**Every release, not the umbrella's alone.** An earlier draft attached it to the umbrella, which quietly
+assumed every repo has one — `[umbrella]` is optional (#73), and a two-package repo with no umbrella (an app
+and its chart, §single-service shape 2) would have left the manifest with nowhere to go. Embedding it in each
+release also answers the question a reader of any one release actually has — *what else shipped with this?* —
+without them needing to know which release is the summary. The cost is a collapsed `<details>` block repeated
+N times, which is cheap next to a rule with an exception in it.
 
 This manifest is the artifact that is genuinely useful for deployment — feeding an umbrella Helm chart or a
-compose bundle. The umbrella *version* is a human-friendly label on it.
+compose bundle. An umbrella *version*, where one is declared, is a human-friendly label on it.
+
+**Ordering within a run** (#96). Packages are released in config order and the umbrella last. Config order
+because #31 already makes it the repo's one observable ordering, so the forge-call log is deterministic and
+testable; umbrella last because its body embeds the manifest, and a summary created before the work it
+summarises is a race waiting to be discovered.
 
 ---
 
@@ -1047,6 +1167,9 @@ inferred: when the tracked app releases, the chart's `appVersion` is rewritten a
 derived bump, because a changed chart artifact requires a new chart version. A chart also bumps on its
 own merits from `feat(api-chart): …` commits; when both apply, the larger bump wins.
 
+A derived release has **no commits of its own**, so its changelog entry is written from `derived_from` rather
+than from a range (#97, §Three contexts).
+
 ### Known limitation: intra-workspace dependency requirements
 
 ```toml
@@ -1063,8 +1186,8 @@ this is harmless — `path` wins locally. It only matters when publishing to a r
 ## CLI surface
 
 ```
-cicada check [--base <ref>] [--head <ref>] [--title <s>]
-                                validate config; lint commits/PR title
+cicada check [--base <ref>] [--head <ref>]
+                                validate config; lint the commits in a range
 cicada plan [--json]            what would be released, and why. touches nothing
 cicada release-pr [--dry-run] [--no-push] [--prerelease <id>]
                                 Phase A: compute, apply, push branch, upsert PR/MR
@@ -1075,8 +1198,18 @@ cicada run [--dry-run] [--no-push]
 cicada template print <name>    emit a built-in template (notes, changelog) to stdout
 ```
 
-Global: `--token`, `--forge`, `--api-url`, `--repo`, `--config`, `--json`, `-v`, `--quiet`.
+Global: `--token`, `--forge`, `--api-url`, `--repo`, `--config`, `--date`, `--json`, `-v`, `--quiet`.
 Colour follows `NO_COLOR` and TTY detection.
+
+`--date YYYY-MM-DD` (#95) defaults to today in UTC and feeds exactly one thing: the date rendered into a
+changelog entry and the release notes. It is a flag rather than a clock read inside the renderer for two
+reasons. It keeps `cicada-core` pure — the date arrives as a value, like `LinkStyle` — and it makes a run
+reproducible: pass the date a previous run used and the `Vec<FileEdit>` is byte-identical. Without it, a
+`--dry-run` at 23:59 and the real run at 00:01 write different changelog entries, which would make #30's
+"the same computation with the write skipped" quietly false once a day.
+
+UTC rather than a configurable zone: a zone is one more input that changes the answer, and a changelog entry
+dated by the release runner's locale is a worse artifact than one dated consistently.
 
 ### Exit codes (#68)
 
@@ -1103,6 +1236,14 @@ Machine interface, so it carries its own version:
 
 Fields may be added within a schema version; removals or meaning changes bump it.
 
+The object carries the `date` the run used (#95), so a plan is reproducible from its own output.
+
+**`from` is `null` on a first release** (#89), present rather than omitted. A package that has never been
+released has no previous version, and each of the alternatives is worse in a specific way: `"0.0.0"` names a
+release that never existed, so a consumer building `…/compare/v{from}...v{to}` emits a URL that 404s; and
+omitting the key is ambiguous with an older cicada that did not emit it yet, which is exactly the ambiguity a
+schema version (#69) exists to prevent. `null` says *there is no previous version* and nothing else.
+
 ### Offline and local rehearsal (#25)
 
 Three levels of "don't touch the upstream", which matter both for dogfooding cicada in its own repo and
@@ -1114,6 +1255,9 @@ for `check` running on forked PRs where no token is available:
 | `--dry-run` | — | — | — | — | not required |
 | `--no-push` | ✓ | ✓ | — | — | not required |
 | default | ✓ | ✓ | ✓ | ✓ | required |
+
+None of these levels reads a clock either — the date is an input at every one of them (#95), so a rehearsal
+and the release it rehearses produce identical bytes rather than identical-looking ones.
 
 `--no-push` leaves the result in the working tree and on a local branch/tag, so the diff cicada *would*
 have pushed can be inspected with plain `git diff` and `git show`. `plan` and `check` must never acquire
@@ -1139,8 +1283,11 @@ $ cicada check --base origin/main --head HEAD
 The "did you mean" suggestion (Levenshtein over configured package names) is what turns decision #11's
 hard error from an obstacle into a helpful one. Exit non-zero, `--json` for annotations.
 
-`commit_source = "title"` lints the PR title instead of the commits, because under squash-merge the title
-is the only thing that lands on the default branch.
+**`check` lints a range and nothing else** (#87). Under squash-merge the PR *title* is what lands on the
+default branch, so linting the title is the thing a squash-merge repo actually wants — and v1 does not do it.
+It is deferred rather than half-specified (future-work §15): an earlier draft routed it through
+`commit_source = "title"`, which is not a member of that setting's enum (`commits` | `merges` | `both`) and
+would be meaningless for history reading, and a flag with no decided semantics is worse than an absent one.
 
 ---
 
@@ -1211,8 +1358,8 @@ Nine methods that can each return 429 or 5xx. Retry with exponential backoff on 
 
 GitHub releases host uploaded files; **GitLab releases do not** — they hold *links* to artifacts stored
 elsewhere. "Attach the manifest to the release" is therefore not one operation, so cicada does not attach it:
-the manifest is embedded in the release body inside a collapsed `<details>` block of fenced JSON, and written
-to `target/cicada/release-manifest.json` on disk. Identical behaviour on every forge, no asset API, and still
+the manifest is embedded in **every** release body the run creates (#42), inside a collapsed `<details>`
+block of fenced JSON, and written to `target/cicada/release-manifest.json` on disk. Identical behaviour on every forge, no asset API, and still
 greppable by a human reading the release. Per-forge asset upload is future work.
 
 ### Auth
@@ -1233,7 +1380,8 @@ CI never runs defeats the entire point of decision #7:
 
 - **GitHub:** `contents: write`, `pull-requests: write`, `issues: write`, plus *Allow GitHub Actions to
   create and approve pull requests*. The default `GITHUB_TOKEN` **does not trigger workflows on PRs it
-  creates** — a PAT or GitHub App token is required for CI to run on the release PR.
+  creates** — a PAT or GitHub App token is required for CI to run on the release PR. On an auto-merging repo
+  this is what makes the loop turn at all, not just a convenience (§No review gate).
 - **GitLab:** Project Access Token, Maintainer role, scopes `api` + `write_repository`. `CI_JOB_TOKEN`
   has the same non-triggering problem for MRs.
 
@@ -1265,12 +1413,33 @@ Link styles — compare URLs, commit URLs, issue references — are supplied to 
 | Context | Renders | `commits` holds | Also available |
 |---|---|---|---|
 | File template | once per package release | that package's commits | `version`, `previous_version`, `package`, `tag`, `sha`, `date` |
-| Notes template | once per package release | that package's commits, **pre-grouped into sections** | the above, plus `links`, `breaking` |
-| Umbrella changelog | once per run | every release in the run, grouped by package | the above, plus `releases` |
+| Notes template | once per package release | that package's commits, **pre-grouped into sections** | the above, plus `links`, `breaking`, `derived_from` |
+| Umbrella changelog | once per run | every release in the run, grouped by package | the above, plus `releases` (each carrying its own `derived_from`) |
 
 Section grouping and ordering stay **config-driven** (`[changelog] sections`). The template receives
 sections already grouped and decides only how to render them — otherwise config and template could
 contradict each other, and the config would silently lose.
+
+**`derived_from` is how a release with no commits explains itself** (#97). A chart dragged by its tracked app
+(#22) receives no commits at all, and a changelog holds only its own package's commits (#15) — so without this
+the entry body renders empty. `derived_from` carries the package and version that caused the release:
+
+```jinja
+{% if derived_from and not commits %}
+_Released to track {{ derived_from.package }} {{ derived_from.version }}._
+{% endif %}
+```
+
+Three things about that choice. The entry is **written, not skipped** — the alternative leaves a hole in the
+chart's changelog where a real tagged release was, and a reader looking up `0.9.1` finds nothing. It is
+**data, not prose cicada emits**: core already labels the bump `derived` in the `Plan`, so this only surfaces
+what exists, and the wording lives in a template that can be overridden (#47) like any other. And it is
+**not an empty entry**, which would be honest and would read as a rendering bug — the same objection F8 makes
+about a silently skipped file write.
+
+A release can be both earned and derived at once (a chart with its own `feat` that its app also dragged). Then
+`commits` is non-empty *and* `derived_from` is set: the default renders the sections normally and the
+guard above suppresses the tracking line, since the entry already explains itself.
 
 ### Overrides and defaults (#47, #48)
 
@@ -1329,7 +1498,7 @@ same `output` path is a **hard error**: last-writer-wins would be a silent, conf
 | YAML editing | `saphyr-parser` | byte-splice scalars, never re-emit (#49). **Spike-confirmed** — `spikes/yaml-splice` |
 | JSON | `serde_json` | manifest emit; span-preserving read for `generic` edits |
 | Globs | `globset` | `release_branches` patterns, package discovery |
-| Dates | `jiff` | changelog dates; no `chrono` legacy surface |
+| Dates | `jiff` | changelog dates, from the `--date` input rather than a clock read (#95); no `chrono` legacy surface |
 | Suggestions | `strsim` | the did-you-mean in `cicada check` (#12) |
 | Diffing | `similar` | rendering `--dry-run` output as a real diff |
 | Testing | `insta` snapshots, `assert_cmd`, temp-repo fixtures | changelog and plan output are snapshot-shaped |
@@ -1385,7 +1554,7 @@ Two sequencing principles, both learned from the decisions above:
 | M | Content | Exit criterion |
 |---|---|---|
 | **M0** | Workspace (`cicada-core` pure + `cicada`), config parsing, `GitBackend` + subprocess impl, conventional-commit parser (multi-scope, breaking, footers). ~~Spike: span-preserving YAML splice~~ **done** | `cicada check` lints a range with did-you-mean suggestions. ✅ Spike complete: `spikes/yaml-splice`, 15 cases green |
-| **M1** | Anchor resolution (per-package ranges, tag reachability), scope routing incl. `default_scope`, bump computation (section `bump`, first-release table, `pre_major`, `maintenance` guard, `Release-As`), umbrella aggregation, `Plan` | `cicada plan --json` correct on a fixture **monorepo and a single-package repo through the same code path**, fully offline |
+| **M1** | Anchor resolution (per-package ranges, tag reachability), scope routing incl. `default_scope`, bump computation (section `bump`, first-release table, `pre_major`, `maintenance` guard), umbrella aggregation, `Plan` | `cicada plan --json` correct on a fixture **monorepo and a single-package repo through the same code path**, fully offline |
 | **M2** | Updaters (cargo, helm, generic path + marker, template), minijinja notes template with three contexts + filters + `template print`, changelog marker insert/create, versions-file write, `FileEdit` boundary | `release-pr --dry-run` prints exactly the diff it would write; snapshot tests green; duplicate-output and re-parse checks fire |
 | **M3** | Git write path: release PR branch reset/commit, committer identity, `release_branches` allowlist, templated `release_pr_branch`, `--no-push` end to end | **`release-pr --no-push` produces a real local release commit**, inspectable with `git show`. First dogfooding gate — no token, no network |
 | **M4** | `Forge` trait (9 methods) + GitHub adapter, upsert by head branch, auth via `GIT_ASKPASS`, retries/error mapping, **staleness model** (committer guard, draft, comment, close on empty plan) | Real release PR on GitHub; hand-editing the release PR branch makes cicada refuse, draft the PR, and fail loudly |
@@ -1408,26 +1577,30 @@ remaining in this plan is assembly of known parts.
 
 None blocking. The design is complete enough to build M0 against.
 
-Deferred scope lives in `docs/future-work.md` — twelve items, each with why it was deferred and what would
+Deferred scope lives in `docs/future-work.md` — seventeen items, each with why it was deferred and what would
 trigger picking it up. Behavioural coverage lives in `docs/scenarios/` — one file per repo shape, written as
-executable scenarios, which is where decisions #73–#79 came from.
+executable scenarios, which is where decisions #73–#79 came from. `single-service.md` covers shapes 1 and 2;
+`monorepo.md` covers only what needs more than one package, and inherits the rest rather than repeating it.
 
-The M0 spike is **complete and #49 holds** — see `spikes/yaml-splice`. Five items are left to first contact
-with the code:
+The M0 spike is **complete and #49 holds** — see `spikes/yaml-splice`. **Nothing is open.** The shape-2
+walkthrough's question — what goes in a derived release's changelog entry — is answered by #97: the entry is
+written, and the notes context carries `derived_from` so the default template can name the cause.
 
-1. **`check`'s title mode.** §`cicada check` routes it through `commit_source = "title"`, which contradicts
-   that setting's own enum (`commits` | `merges` | `both`) and would be meaningless for history reading. The
-   mode belongs on the existing `--title` flag or a setting of its own.
-2. **`{summary}` in `release_pr_title`** has no defined rendering, for one package or for many.
-3. **A derived chart bump on a never-released chart** (#22 meeting #37) lands on `0.0.1`, which is a strange
-   first chart version. `0.1.0`, or requiring `initial_version`, are the alternatives.
-4. **A promoted prerelease line is stale until `main` is merged back** (F9). The `prerelease` key is deleted
-   by a commit on `main`, so the line still reads `version = "1.4.2"`, `prerelease = "1.5.0-rc.2"` and cuts
-   `1.5.0-rc.3` — an rc for a version already shipped, sorting below it. No guard fires. Either accept it and
-   document the merge-back, or extend #9's reachability primitive from the tag being created to the computed
-   stable base.
-5. **`from` on a first release in `--json`** (delta 15): `null`, absent, or `"0.0.0"`. A machine interface
-   with a compatibility promise (#69) should not leave this to the implementation.
+The monorepo pass's two questions are decided — the manifest is embedded in every release the run creates
+rather than the umbrella's alone (#42), and releases are created in config order with the umbrella last (#96).
+The five items that stood here through the single-service pass are decided too, four of them by taking scope
+out rather than adding a rule:
 
-Two smaller ones, both on `Release-As:`: whether a prerelease value is legal there outside the §Prereleases
-flow, and whether it forces a release when attached to a `bump = "none"` type.
+| Was open | Resolution |
+|---|---|
+| `check`'s title mode contradicted `commit_source`'s enum | `check` lints a range only; title linting deferred (#87, future-work §15) |
+| `{summary}` in `release_pr_title` had no defined rendering | The title is a plain string with no interpolation (#86, future-work §16) |
+| A derived chart bump on a never-released chart landed on `0.0.1` | `initial_version` is required on a `helm` package, so the case cannot arise (#88) |
+| `from` on a first release in `--json` | `"from": null`, present and explicit (#89) |
+| A promoted prerelease line keeps cutting rcs below the stable it shipped | Accepted: cicada acts on what the branch and the config say, and merging back is the operator's job (#91) |
+| Two sub-questions on `Release-As:` | Dissolved — forced versions are out of v1 (#39, future-work §13) |
+
+The scenario-4 pass added three more, and all three went the same way: **two dissolved with the scope cut**
+(`Release-As` on a prerelease branch, and forced-version monotonicity against an open prerelease both
+presuppose forced versions), and the third was a wording gap rather than a behaviour question — the staleness
+guard's `prev` is now stated as stable-only (#90).

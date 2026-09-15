@@ -446,7 +446,7 @@ commit_source     = "commits"                 <span class="c"># --no-merges; ide
 
 <span class="c"># the release PR cicada opens — its head branch and its title</span>
 release_pr_branch = "cicada/{branch}"         <span class="c"># renders cicada/prerelease-v1.5-rc here</span>
-release_pr_title  = "chore(release): {summary}"
+release_pr_title  = "chore(release): prepare release"
 
 <span class="c"># no prerelease_branches / prerelease_identifier — the defaults are already
 # ["prerelease/**", "prerelease-*"] and "rc", which is what this line wants (#83)
@@ -506,7 +506,7 @@ path = "Cargo.toml"
 
   <div class="note col">
     <h3>It has to be a pattern, not a value on the branch</h3>
-    <p>Putting <span class="mono">prerelease = "rc"</span> in <span class="mono">prerelease-v1.5-rc</span>&rsquo;s own <span class="mono">cicada.toml</span> reads like it would work, and it does not: promoting the line merges <span class="mono">prerelease-v1.5-rc</span> into <span class="mono">main</span>, and that merge brings the config file along. <span class="mono">main</span> would start cutting rcs, and the only escape would be hand-resolving the config on every promotion &mdash; exactly the step that gets missed. With a pattern, both branches carry the same bytes, the merge is a no-op on the config, and <span class="mono">main</span> cuts <span class="mono">1.5.0</span> because it simply does not match <span class="mono">"next"</span>.</p>
+    <p>Putting <span class="mono">prerelease = "rc"</span> in <span class="mono">prerelease-v1.5-rc</span>&rsquo;s own <span class="mono">cicada.toml</span> reads like it would work, and it does not: promoting the line merges <span class="mono">prerelease-v1.5-rc</span> into <span class="mono">main</span>, and that merge brings the config file along. <span class="mono">main</span> would start cutting rcs, and the only escape would be hand-resolving the config on every promotion &mdash; exactly the step that gets missed. With a pattern, both branches carry the same bytes, the merge is a no-op on the config, and <span class="mono">main</span> cuts <span class="mono">1.5.0</span> because it simply does not match <span class="mono">prerelease-*</span>.</p>
   </div>
 </section>
 
@@ -669,10 +669,10 @@ version = <span class="add">"1.5.0"</span></pre>
     <p>The merge brings <span class="mono">R1</span> and <span class="mono">R2</span> onto <span class="mono">main</span> with everything else, so they sit inside the <span class="mono">v1.4.2..HEAD</span> range that computes the stable release. They change nothing: <span class="mono">chore(release):</span> is a <span class="mono">chore</span>, whose section is <span class="mono">bump = "none", hidden = true</span> &mdash; it cannot justify a release and it cannot appear in an entry. The release PR title being conventional and non-releasable is what makes the promotion diff clean.</p>
   </div>
 
-  <div class="note open col">
-    <h3>Open — what happens to <span class="mono">prerelease-v1.5-rc</span> afterwards</h3>
+  <div class="note col">
+    <h3>Decided &mdash; the line is the operator&rsquo;s to retire</h3>
     <p>The <span class="mono">prerelease</span> key is deleted by the stable release, but that deletion is a commit on <span class="mono">main</span>. Until <span class="mono">main</span> is merged back into <span class="mono">prerelease-v1.5-rc</span> &mdash; or the branch is re-cut &mdash; <span class="mono">prerelease-v1.5-rc</span> still reads <span class="mono">version = "1.4.2"</span>, <span class="mono">prerelease = "1.5.0-rc.2"</span>. A new <span class="mono">feat:</span> there recomputes the same base <span class="mono">1.5.0</span>, finds it unchanged, and cuts <span class="mono">v1.5.0-rc.3</span> &mdash; an rc for a version that has already shipped, and one that sorts <em>below</em> it.</p>
-    <p>Merging <span class="mono">main</span> back into <span class="mono">prerelease-v1.5-rc</span> after each promotion is the practical answer, and it is what the release-branch arrangement already asks for in scenario 2. Whether cicada should detect the stale state and refuse is not settled in <span class="mono">docs/design.md</span>.</p>
+    <p>cicada does <strong>not</strong> detect this (#91). It acts on what the branch and the config say, and this branch says an rc line is open. Refusing would mean extending the collision check from the tag being created to the computed stable base &mdash; machinery added to notice a branch its operator stopped maintaining. The fix is a <strong>fast-forward</strong>: the line&rsquo;s tip is already an ancestor of <span class="mono">main</span>, so merging <span class="mono">main</span> back conflicts on nothing, and afterwards the line reads <span class="mono">1.5.0</span> with no <span class="mono">prerelease</span> key and the counter resets.</p>
   </div>
 </section>
 
