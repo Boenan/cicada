@@ -569,6 +569,31 @@ mysterious: it is the same primitive as the collision check (#9), reported from 
 **G5 · divergence is permanent and accepted.** After G1, `main`'s `CHANGELOG.md` never learns about `1.4.8`.
 Asserted as expected behaviour, not a bug (future-work §10).
 
+**G10 · a parallel line that still takes features.** The variant of G6 where the older line is *maintained*
+rather than frozen — an LTS on `1.x` still shipping features while `main` is on `2.x`. It differs from G1–G6
+in one line of config:
+
+```toml
+release_branches     = ["main", "release/*"]
+maintenance_branches = []                     # or a pattern that release/1.x does not match
+```
+
+- given `main` at `2.1.0` (tag `v2.1.0`); `release/1.x` at `1.9.3` (tag `v1.9.3`, reachable from that branch)
+- when `feat: add export` lands on `release/1.x`
+- then `1.9.3 → 1.10.0` — a **minor on a release branch**, which G2 would have refused
+- assert `main` is untouched, and assert **no collision**: `v1.10.0` does not exist anywhere, because the two
+  lines are on different majors and cannot converge (#9, #80)
+
+Asserted because G2 and G4 between them make "a `feat:` on a `release/*` branch" look like it is always an
+error, and it is not — it is an error only when the branch matches `maintenance_branches` (G2) or when the
+computed version is already taken (G4). Nothing about a release branch is inherently patch-only; the pattern
+is what makes it so.
+
+**G10b · the two lines are on different majors, and that is load-bearing.** Construct the failure: move
+`main` back to `1.9.x` so both lines compute `1.10.0`. The second to run hits the collision check, exit `4`
+(G4). Assert the pair together — G10 works *because* the majors differ, not because parallel lines are
+special-cased.
+
 ---
 
 ## H · Branch gating, offline, rehearsal
@@ -601,6 +626,16 @@ rehearsal. This is the M3 dogfooding gate.
 **H8 · shallow clone.** `git rev-parse --is-shallow-repository` returns true → error naming `fetch-depth: 0`
 (Actions) and `GIT_DEPTH: 0` (GitLab), exit `1`. Detected up front, before any range is computed, so the
 failure is never a silently truncated changelog.
+
+**H9 · on-demand and scheduled runs are ordinary runs.** cicada is gated on the **branch**, never on what
+started the process (#26). Assert identical behaviour and an identical forge-call log across three triggers on
+the same repo state: a push-triggered CI run, a cron-triggered CI run (D5d), and a developer running
+`cicada run` from a laptop with `CICADA_TOKEN` set. Assert also that nothing in the config names a trigger —
+there is no schedule, no event filter, and no `on:` equivalent anywhere in `cicada.toml`.
+
+This is what makes "release when we decide to" a supported arrangement needing no feature: the decision is
+*when to run cicada*, and that has always been the caller's. What a run cannot do is release a range that
+justifies no release (§Non-goals) — which is D5d, and the reason that scenario sits next to this one.
 
 ---
 
@@ -677,6 +712,38 @@ commit trips the staleness guard first (D2).
 
 **J6 · `commit_source` on a squash/rebase repo.** `main` is linear, so all three produce **identical** plans.
 Asserted because it is the claim that lets cicada work out of the box regardless of merge strategy.
+
+**J7 · a trunk fed only by merges.** J5 asserts the three traversals; this asserts the *arrangement* they
+exist for — a git-flow-shaped `main` that never takes a direct commit, where everything arrives as a merge
+from a feature or release branch. Build the fixture so the two readings genuinely disagree:
+
+```
+main    A ──────── m1 ──────── m2
+                    ╲           ╲
+feature/x     c1 feat: add export · c2 chore: tidy
+feature/y                         c3 fix: handle nil
+```
+
+`m1`'s merge message is `Merge pull request #41 from feature/x` under GitHub's default, or
+`Merge branch 'feature/x' into 'main'` carrying the MR title under GitLab's.
+
+| setting | plan | why |
+|---|---|---|
+| `"commits"` (default) | `feat` + `chore` + `fix` → **minor** | reads `c1`, `c2`, `c3`; merge commits skipped |
+| `"merges"` | depends entirely on the merge messages | reads `m1`, `m2` only — GitHub's default message is not a conventional commit, so **no release** |
+| `"both"` | `feat` + `fix`, plus whatever the merge commits parse as | can count `c1` and `m1` as two changes |
+
+**J7 detail — the default is not always right, and the failure is quiet.** On GitLab, where the default merge
+message carries the MR title, `"merges"` is the setting that reads what humans actually wrote and
+`"commits"` reads the individual commits inside — often WIP messages that were never meant to be release
+notes. On GitHub the reverse holds, because its default merge message is not conventional at all and
+`"merges"` would see nothing releasable. Assert the GitHub case explicitly: `commit_source = "merges"` on a
+repo whose merge messages are GitHub's default produces an **empty plan**, exit `0`, and no release — a repo
+that silently stops releasing, with a green pipeline, which is the failure mode this row exists to make
+recognisable.
+
+Assert also what J6 already implies: switch the same repo to squash-merge and all three settings agree again,
+so the setting only ever matters on a repo that keeps merge commits.
 
 ---
 
@@ -914,13 +981,20 @@ section, which is the method `docs/next-steps.md` recommends:
 ## Coverage against the design
 
 Sections of `docs/design.md` exercised by at least one scenario here: anchor resolution · commit parsing ·
-`commit_source` · bump computation · first-release table · `pre_major` · the `maintenance` guard ·
-prereleases (all of #59–#63, #84–#85, #93–#94, including promotion and staged `alpha`/`beta`/`rc` lines) ·
-release manifest · all four updater kinds ·
-both addressing modes · YAML
-splice traps · changelog insertion · templates and filters · both phases · staleness (all three layers) ·
-tag reconciliation · independent release reconciliation · version collision · maintenance branches ·
-branch gating · offline modes · exit codes · `--json` schema · chart tracking.
+`commit_source`, both as traversals (J5, J6) and as the merge-fed-trunk arrangement they exist for (J7) ·
+bump computation · first-release table · `pre_major` · the `maintenance` guard · prereleases (all of
+#59–#63, #84–#85, #93–#94, including promotion and staged `alpha`/`beta`/`rc` lines) · release manifest and
+its per-release embedding (#42, #96) · all four updater kinds · both addressing modes · YAML splice traps ·
+changelog insertion, including a derived release's entry (M1b, #97) · templates and filters · both phases ·
+staleness (all three layers) · tag reconciliation · independent release reconciliation · version collision ·
+maintenance branches · **parallel feature-taking lines (G10)** · branch gating and **trigger independence
+(H9, D5d)** · offline modes · exit codes · `--json` schema · chart tracking.
+
+**Release strategies covered by at least one scenario:** trunk releases (C1–C8) · trunk plus patch-only
+maintenance lines (G1–G5) · trunk plus a parallel feature-taking line (G10) · a prerelease line feeding trunk
+(F1–F8) · staged `alpha`/`beta`/`rc` lines (F10d–F10f) · continuous deployment via auto-merge (C9) ·
+on-demand and scheduled runs (H9, D5d) · git-flow's merge-fed trunk (J7) · 0ver (B5, B6) · tag-only releases
+(K9) · app plus chart (group M).
 
 **Not exercised here, by construction** — these need more than one service and move to
 `docs/scenarios/monorepo.md`: umbrella aggregation (#10, #15), multi-scope commits (`feat(api,worker):`),
