@@ -13,9 +13,8 @@ next* and *what is easy to get wrong*.
 | **Behavioural coverage** | `docs/scenarios/single-service.md` (~140 scenarios, groups A–N) and `docs/scenarios/monorepo.md` (groups O–Y, only what needs N > 1), in five-surface form, doubling as the acceptance suite. Four HTML walkthroughs under `docs/scenarios/single-service/` |
 | **Deferred scope** | `docs/future-work.md`, 16 items, each with why it was deferred and what would trigger it |
 | **M0 spike** | **Done and confirmed.** `spikes/yaml-splice`, 15 tests green |
-| **Production code** | **None yet.** `src/main.rs` is still `cargo new` output |
-
-Committed: `docs/`. Untracked: `.gitignore`, `Cargo.toml`, `src/`, `spikes/`.
+| **M0** | **Done.** Two-crate workspace, config parsing, `GitBackend` + subprocess impl, conventional-commit parser, `cicada check`. 52 tests green |
+| **Production code** | `cicada-core/` (pure) and `cicada/` (lib + bin). Next milestone is M1 |
 
 **The scenario pass rewrote parts of the design.** Decisions #73–#85 all came out of writing expected
 outcomes down, and four earlier decisions were reversed outright — see *Do not re-litigate* below, and note
@@ -36,15 +35,44 @@ and PR-label-driven versioning. **None fails by omission.**
 
 ---
 
-## The next step: finish M0
+## M0 is done
 
-The spike discharged M0's only unproven assumption (decision #49 — span-preserving YAML splice — holds;
-`saphyr-parser` is the crate). Everything left in M0 is assembly of known parts.
+**Exit criterion met:** `cicada check --base <ref> --head <ref>` lints a commit range with did-you-mean
+suggestions and validates the config, exiting `0` clean / `3` on findings / `1` on a config that will not
+parse. cicada checks its own repo — `cicada.toml` at the root is both its configuration and the worked
+example an adopter copies from (#21).
 
-**M0 exit criterion:** `cicada check --base <ref> --head <ref>` lints a commit range with did-you-mean
-suggestions and validates the config, exiting `0` clean / `3` on findings.
+What landed, and where:
 
-### 1. Workspace restructure
+| Piece | Location |
+|---|---|
+| Two-crate workspace, purity enforced by the manifest (#29) | `cicada-core/`, `cicada/` |
+| Conventional-commit parser, multi-scope, `!`, `BREAKING CHANGE:` | `cicada-core/src/commit.rs` |
+| Config types, `deny_unknown_fields`, defaults (#67, #83) | `cicada-core/src/config.rs` |
+| Branch globs (#82) | `cicada-core/src/branch.rs` |
+| Pure validations + did-you-mean (#12) | `cicada-core/src/check.rs` |
+| `GitBackend` trait + `git` subprocess impl (#17) | `cicada/src/git/` |
+| Filesystem validations, incl. the workspace trap (#24) | `cicada/src/config.rs` |
+| CLI, exit codes (#68), `--json` schema (#69) | `cicada/src/main.rs` |
+
+**Three things the build settled that the design had left implicit:**
+
+1. **`PackageId` is an ordinal, not a name.** §Data flow shows `BTreeMap<PackageId, …>` annotated "ordered
+   by config order" — which is only true if the key sorts in config order, and a `String` key sorts
+   alphabetically. `PackageId(usize)` indexing into the config's `IndexMap` makes #31 mechanical rather than
+   a convention to remember, and makes "umbrella last" (#96) fall out of `Target`'s derived `Ord`.
+2. **Did-you-mean needs Damerau-Levenshtein, not plain Levenshtein.** A transposition costs 2 under plain
+   Levenshtein, which is over the threshold for a short name — so `aip` → `api`, the design's own worked
+   example in §`cicada check`, produced no suggestion at all. Found by running the example by hand; every
+   unit test had passed, because they happened to use substitutions rather than transpositions.
+3. **`cicada` is a lib **and** a bin.** Integration tests need to drive the real `GitBackend` against real
+   repositories rather than a mock, and a bin-only crate cannot be imported.
+
+**Test shape, for the milestones that follow:** 22 table tests on the parser and did-you-mean, 12 against
+real temp repos for `GitBackend`, 15 end-to-end on `check` asserting **exit codes** rather than only output —
+they are a contract (#68), and CI branches on them.
+
+### ~~1. Workspace restructure~~ — done
 
 Root `Cargo.toml` is currently a plain package. It needs to become a two-crate workspace (#29):
 
@@ -58,7 +86,7 @@ spikes/          standalone, already carries its own [workspace] so it stays out
 Do **not** split git/forge/updaters into separate crates. That was considered and rejected: they are all
 I/O adapters, none will be consumed independently, and separate crates buy only `pub` noise.
 
-### 2. Config parsing and validation
+### ~~2. Config parsing and validation~~ — done
 
 Schema is fully specified in §Configuration. Two things that are easy to skip and shouldn't be:
 
@@ -68,7 +96,7 @@ Schema is fully specified in §Configuration. Two things that are easy to skip a
   nicety — duplicate tag formats, `default_scope` naming a real package, duplicate updater outputs, and
   the Cargo workspace-inheritance trap (#24).
 
-### 3. `GitBackend` (trait + `git` subprocess impl)
+### ~~3. `GitBackend` (trait + `git` subprocess impl)~~ — done
 
 Needs: log walking with the three `commit_source` traversals (#40), tag list/resolve, ancestry checks
 (`--is-ancestor`, for #3 and #9), shallow detection, and `git --version` at startup.
@@ -77,7 +105,7 @@ Subprocess discipline from the first line (§Tech choices): machine-readable for
 (`--format=%H%x00%s%x00%b`, `-z`), pinned environment (`LC_ALL=C`, `GIT_CONFIG_NOSYSTEM=1`,
 `GIT_TERMINAL_PROMPT=0`). Never parse human-facing output.
 
-### 4. Conventional-commit parser
+### ~~4. Conventional-commit parser~~ — done
 
 Hand-written, not an off-the-shelf crate — the multi-scope extension (`feat(api,worker)!:`) is the reason.
 Handles scopes, `!`, and `BREAKING CHANGE:`. Footers are parsed generically but **only `BREAKING CHANGE:` is
@@ -85,7 +113,7 @@ acted on** — `Release-As:` is out of scope (#39) and must be ignored rather th
 a repo migrating from release-please will have them in its history (E1). Lives in `cicada-core`, so it is a
 pure `&str -> ParsedCommit` function and trivially table-tested.
 
-### 5. `cicada check`
+### ~~5. `cicada check`~~ — done
 
 Takes a **git range, not a forge PR object** — no API call, no token, identical on GitHub, GitLab and a
 laptop. A range and nothing else: there is no `--title` flag and no title mode (#87). Levenshtein (`strsim`)
@@ -201,9 +229,17 @@ Four features were removed rather than deferred quietly, and two of them change 
 
 ---
 
-## After M0
+## Next: M1
 
-`docs/design.md` §Milestones, M1–M8. Two waypoints worth knowing:
+Anchor resolution (per-package ranges, tag reachability), scope routing incl. `default_scope`, bump
+computation (section `bump`, first-release table, `pre_major`, the `maintenance` guard), umbrella
+aggregation, `Plan`. Exit criterion: `cicada plan --json` correct on a fixture **monorepo and a
+single-package repo through the same code path**, fully offline.
+
+The read half of `GitBackend` that M1 needs is already built and tested — `rev_parse`, `is_ancestor`, `tags`
+— so M1 is core work with no new I/O surface.
+
+`docs/design.md` §Milestones has M1–M8. Two waypoints worth knowing:
 
 - **M3 is the first genuinely useful build** — `release-pr --no-push` produces a real local release commit
   you can inspect with `git show`, with no token and no upstream involvement. This is the dogfooding gate;
@@ -228,9 +264,10 @@ The scenario pass found three more of exactly the same shape, all by tracing rat
 - **#34's motivating example did not hold.** "Close the PR after the only `feat:` was reverted" — but a
   revert does not remove the `feat` from `git log`, so the plan never empties. Revert handling is deferred
   (future-work §11) and #34's real triggers are config edits.
-- **The prerelease merge-back claim was false.** "Merging `next` into `main` just works because main's config
-  has no `prerelease`" — except the merge brings `next`'s config file along, so main starts cutting rcs. Fixed
-  by #82.
+- **The prerelease merge-back claim was false.** An earlier draft held that merging a prerelease line into
+  `main` "just works, because main's config has no `prerelease`" — except the merge brings the line's config
+  file along, so main starts cutting rcs. Fixed by #82: branch *identity* is a glob matched against the
+  current branch name, never a scalar living on the branch it describes.
 
 Worth keeping that habit: when a section claims a property, trace the sequence that is supposed to produce
 it. Writing expected outcomes down is the cheapest way to force the trace.

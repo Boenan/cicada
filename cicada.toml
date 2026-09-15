@@ -1,0 +1,27 @@
+# cicada releases itself with cicada (#21). This file is both the tool's own
+# configuration and its first reference implementation — the worked example an
+# adopter copies from.
+
+[settings]
+release_branches = ["main"]
+default_scope    = "cicada"      # unscoped commits are cicada changes
+
+[forge]
+kind = "github"                  # required — never guessed at release time (#66)
+repo = "boenan/cicada"
+
+# One package, not two. `cicada-core` is an implementation detail that ships
+# inside the binary; it is not separately released, and registry publishing is
+# out of scope (future-work §1). Declaring it here would also trip #24, since
+# both crates inherit `version.workspace = true`.
+[packages.cicada]
+path       = "."
+tag_format = "v{version}"
+changelog  = "CHANGELOG.md"
+
+[[packages.cicada.updaters]]
+kind = "cargo"
+path = "cicada/Cargo.toml"       # inherits, so the bump lands on [workspace.package]
+
+# no [umbrella] — a single-service repo has no aggregate version to declare (#73)
+# no [changelog] — the built-in five-row default is what this repo wants (#48)
