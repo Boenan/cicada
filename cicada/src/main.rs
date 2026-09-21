@@ -13,7 +13,7 @@ use cicada_core::check::{Finding, Severity, lint_commits, validate_config, valid
 use cicada_core::plan::{PlanError, PlanInput};
 use cicada::git::{GitBackend, GitCli};
 use cicada::report::Style;
-use cicada::{config, history, prepare, report, versions};
+use cicada::{config, git, history, prepare, report, versions};
 
 /// Exit codes are a contract, not an implementation detail (#68). CI branches on
 /// them, so `3` (your commits are malformed) and `4` (cicada declined to act) are
@@ -429,8 +429,11 @@ fn cmd_plan(cli: &Cli) -> anyhow::Result<u8> {
     Ok(exit::OK)
 }
 
-/// Phase A, as far as this build goes: compute the plan, render it to
-/// `Vec<FileEdit>`, and print the diff.
+/// Phase A — compute the release, write the files onto the release PR branch.
+///
+/// The steps are the design's, in the design's order (§Phase A). Two of them are
+/// refusals, and both run under `--dry-run` as well: a rehearsal that reports
+/// success where the real run would refuse is a rehearsal that lies.
 fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8> {
     let p = match prepare_run(cli)? {
         Prep::Ready(p) => p,
@@ -439,24 +442,37 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
     let cfg = &p.loaded.config;
     let style = Style::detect();
 
-    // The gate (#26). Unlike `plan`, this command writes — so a branch outside
-    // `release_branches` exits 0 quietly rather than being asked to explain
-    // itself (H1).
+    // 0. The gate (#26). Unlike `plan`, this command writes — so a branch outside
+    //    `release_branches` exits 0 quietly rather than being asked to explain
+    //    itself (H1).
     if !p.on_release_branch {
         tracing::info!(branch = %p.branch, "not a release branch; nothing to do");
         return Ok(exit::OK);
     }
 
+    // 4. An empty plan is a normal outcome (#68). Closing an open release PR
+    //    (#34) needs the forge and lands in M4.
     if p.plan.is_empty() {
         if !cli.quiet {
-            print!("{}", report::summarise_edits(&style, 0));
+            print!("{}", report::summarise_edits(&style, 0, false));
         }
         return Ok(exit::OK);
+    }
+
+    if !dry_run && !no_push {
+        anyhow::bail!(
+            "pushing and opening the pull request land in M4\n\
+             `--no-push` does everything up to that: it writes a real release commit on \
+             `{}`, which `git show` will display",
+            cicada_core::branch::render_pr_branch(&cfg.settings.release_pr_branch, &p.branch)
+        );
     }
 
     let root = p.repo.root();
     let date = cli.date.unwrap_or_else(today_utc);
 
+    // 5. Render the plan to edits.
+    //
     // `forge.repo` when stated, otherwise derived from `origin`. Deriving is fine
     // here and nowhere near `forge.kind` (#66): a wrong link costs a 404 in a
     // changelog, a wrong forge costs a release.
@@ -486,24 +502,129 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
         eprintln!("warning: {w}");
     }
 
+    // 6. A computed version whose tag already exists elsewhere means two release
+    //    lines are converging on one number (#80). Refuse *before* a PR exists,
+    //    rather than after a human has reviewed and merged it.
+    if let Some(code) = collision_check(&p)? {
+        return Ok(code);
+    }
+
+    // 7. Do not clobber a branch cicada did not write (#32).
+    let head_branch =
+        cicada_core::branch::render_pr_branch(&cfg.settings.release_pr_branch, &p.branch);
+    let identity = cicada_core::Identity::parse(&cfg.settings.committer)
+        .map_err(|e| anyhow::anyhow!("settings.committer: {e}"))?;
+    if let Some(code) = staleness_guard(&p, &head_branch, &identity)? {
+        return Ok(code);
+    }
+
     if dry_run {
         if !cli.quiet {
             print!("{}", report::render_diff(&style, &rendered.edits, &sources));
-            print!("{}", report::summarise_edits(&style, rendered.edits.len()));
+            print!("{}", report::summarise_edits(&style, rendered.edits.len(), false));
         }
         return Ok(exit::OK);
     }
 
-    // M3 is the git write path: reset the release PR branch, commit as the
-    // configured committer, and (M4) upsert the PR. Writing the files without any
-    // of that would leave a dirty tree with no branch to carry it, which is worse
-    // than not writing them.
-    let _ = no_push;
-    anyhow::bail!(
-        "only `--dry-run` is implemented in this build: the release commit and branch land in M3, \
-         the pull request in M4\nthe plan and the diff are correct now — `cicada release-pr \
-         --dry-run` prints exactly what would be written"
+    // 8. Reset the head branch to HEAD, apply the edits, commit.
+    let message = commit_message(cfg, &p.plan);
+    let outcome = p.repo.commit_edits(&git::CommitRequest {
+        branch: &head_branch,
+        base: "HEAD",
+        edits: &rendered.edits,
+        message: &message,
+        identity: &identity,
+    })?;
+
+    if !cli.quiet {
+        let verb = if outcome.created { "committed" } else { "unchanged" };
+        println!(
+            "  {} {}  {}",
+            style.green("✓"),
+            head_branch,
+            style.dim(&format!("{verb} {}", &outcome.sha[..outcome.sha.len().min(9)]))
+        );
+        print!("{}", report::summarise_edits(&style, rendered.edits.len(), true));
+        println!("  {}", style.dim(&format!("inspect it with `git show {head_branch}`")));
+    }
+
+    Ok(exit::OK)
+}
+
+/// #80 — the version-collision check, run in Phase A as well as Phase B.
+///
+/// A tag that exists but is **not reachable from HEAD** means it was cut on
+/// another line that is about to claim the same number. Discovering that in Phase
+/// B would mean the release PR had already been reviewed and merged, leaving the
+/// branch merged-but-untagged; discovering it here costs nothing and lands the
+/// error before a human has read anything.
+fn collision_check(p: &Prepared) -> anyhow::Result<Option<u8>> {
+    for r in &p.plan.releases {
+        if p.repo.rev_parse(&r.tag)?.is_none() {
+            continue;
+        }
+        if p.repo.is_ancestor(&r.tag, "HEAD")? {
+            continue;
+        }
+        eprintln!(
+            "error: '{}' computes version {}, but tag `{}` already exists somewhere this branch \
+             cannot see\ntwo release lines are converging on one number — cicada will not open a \
+             pull request for it\nthe tag was cut on another line; reconcile the two before \
+             releasing either",
+            r.name, r.to, r.tag
+        );
+        return Ok(Some(exit::REFUSED));
+    }
+    Ok(None)
+}
+
+/// #32 — cicada replaces the release PR branch each run, and refuses to clobber
+/// a commit it did not write.
+///
+/// A human commit on that branch is the one thing on it that is *not* derivable
+/// from the base branch, so "throw it away and recompute" would destroy
+/// information that exists nowhere else.
+fn staleness_guard(
+    p: &Prepared,
+    head_branch: &str,
+    identity: &cicada_core::Identity,
+) -> anyhow::Result<Option<u8>> {
+    let Some(tip) = p.repo.branch_tip(head_branch)? else { return Ok(None) };
+    let committer = p.repo.committer_of(&tip)?.unwrap_or_default();
+    if committer == identity.to_git() {
+        return Ok(None);
+    }
+    eprintln!(
+        "error: `{head_branch}` has a commit cicada did not write, so cicada will not replace it\n\
+         \n  tip       {}\n  committer {committer}\n  expected  {}\n\
+         \nThat commit exists nowhere else — it is not derivable from `{}`, so discarding it would\n\
+         lose it. Move the change onto `{}` if it belongs there, then delete or reset\n\
+         `{head_branch}` and run again.",
+        &tip[..tip.len().min(9)],
+        identity.to_git(),
+        p.branch,
+        p.branch,
     );
+    // Drafting the PR, labelling it `cicada:stale` and commenting (#33 layer 2)
+    // need the forge and land in M4. The refusal itself — the part that stops a
+    // wrong release — is here.
+    Ok(Some(exit::REFUSED))
+}
+
+/// The release commit's message.
+///
+/// The subject is `release_pr_title`, which is conventional and **non-releasable**
+/// (#41, #36) — so cicada's own release commit cannot trigger a release on the
+/// next run. The body lists what moved, in config order (#31), because `git show`
+/// on this commit is the whole point of `--no-push` (H6).
+fn commit_message(cfg: &cicada_core::Config, plan: &cicada_core::plan::Plan) -> String {
+    let mut m = cfg.settings.release_pr_title.clone();
+    m.push_str("\n\n");
+    for r in &plan.releases {
+        let from = r.from.as_ref().map(ToString::to_string).unwrap_or_else(|| "—".into());
+        m.push_str(&format!("{} {} → {}\n", r.name, from, r.to));
+    }
+    m
 }
 
 /// The `plan --json` payload (#69).

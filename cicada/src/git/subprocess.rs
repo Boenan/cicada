@@ -3,7 +3,7 @@ use std::process::Command;
 
 use cicada_core::{CommitSource, RawCommit};
 
-use super::{GitBackend, GitError};
+use super::{CommitOutcome, CommitRequest, GitBackend, GitError};
 
 /// `--format` is NUL-delimited so a subject containing a newline, a tab or any
 /// other plausible character cannot break the parse. The record separator is a
@@ -64,15 +64,43 @@ fn check_version(cwd: &Path) -> Result<(), GitError> {
 }
 
 fn run(cwd: &Path, args: &[&str]) -> Result<String, GitError> {
-    let out = Command::new("git")
-        .args(args)
+    run_full(cwd, args, &[], None)
+}
+
+/// The one place a git subprocess is spawned.
+///
+/// `env` adds to the pinned base rather than replacing it, and `stdin` is bytes
+/// because `hash-object --stdin` is fed file content that cicada must not
+/// re-encode on the way past.
+fn run_full(
+    cwd: &Path,
+    args: &[&str],
+    env: &[(&str, String)],
+    stdin: Option<&[u8]>,
+) -> Result<String, GitError> {
+    let mut cmd = Command::new("git");
+    cmd.args(args)
         .current_dir(cwd)
         // Pinned environment: identical output regardless of the developer's
         // locale, global config, or credential helpers.
         .env("LC_ALL", "C")
         .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .output()?;
+        .env("GIT_TERMINAL_PROMPT", "0");
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+
+    let out = if let Some(bytes) = stdin {
+        use std::io::Write;
+        cmd.stdin(std::process::Stdio::piped());
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        let mut child = cmd.spawn()?;
+        child.stdin.take().expect("stdin was piped").write_all(bytes)?;
+        child.wait_with_output()?
+    } else {
+        cmd.output()?
+    };
 
     if !out.status.success() {
         return Err(GitError::Command {
@@ -155,11 +183,149 @@ impl GitBackend for GitCli {
             .filter(|s| !s.is_empty()))
     }
 
+    fn branch_tip(&self, branch: &str) -> Result<Option<String>, GitError> {
+        // `refs/heads/` explicitly: a tag and a branch may share a name, and a
+        // question about a branch must not be answered by a tag.
+        self.rev_parse(&format!("refs/heads/{branch}"))
+    }
+
+    fn committer_of(&self, rev: &str) -> Result<Option<String>, GitError> {
+        Ok(run_opt(&self.root, &["log", "-1", "--format=%cn <%ce>", rev])?
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()))
+    }
+
+    fn commit_edits(&self, req: &CommitRequest<'_>) -> Result<CommitOutcome, GitError> {
+        let base = self
+            .rev_parse(req.base)?
+            .ok_or_else(|| GitError::Command {
+                args: format!("rev-parse {}", req.base),
+                status: "no such commit".into(),
+                stderr: format!("`{}` does not resolve", req.base),
+            })?;
+
+        // A private index, so the real one — and whatever the developer had
+        // staged in it — is untouched (#100). Named by pid so two runs in one
+        // workspace cannot collide (D6).
+        let index = self.root.join(".git").join(format!("cicada-index-{}", std::process::id()));
+        let _guard = TempIndex(index.clone());
+        let env = [("GIT_INDEX_FILE", index.to_string_lossy().to_string())];
+
+        run_full(&self.root, &["read-tree", &base], &env, None)?;
+
+        for e in req.edits {
+            // `--path` applies the same gitattributes clean filters `git add`
+            // would, so a repo with `* text=auto` gets the content git expects to
+            // store rather than the bytes cicada happened to compute.
+            let blob = run_full(
+                &self.root,
+                &["hash-object", "-w", "--path", &e.path, "--stdin"],
+                &[],
+                Some(e.content.as_bytes()),
+            )?
+            .trim()
+            .to_string();
+
+            // Preserve the file's existing mode. A Makefile or shell script
+            // carrying a marker comment (#50) may well be executable, and
+            // hard-coding 100644 would silently un-execute it.
+            let mode = self.mode_of(&base, &e.path)?.unwrap_or_else(|| "100644".to_string());
+            run_full(
+                &self.root,
+                &["update-index", "--add", "--cacheinfo", &format!("{mode},{blob},{}", e.path)],
+                &env,
+                None,
+            )?;
+        }
+
+        let tree = run_full(&self.root, &["write-tree"], &env, None)?.trim().to_string();
+
+        // Idempotency: if the branch already holds this exact tree on this exact
+        // parent, there is nothing to do. Without this, a re-run mints a new sha
+        // for identical content purely because the clock moved.
+        if let Some(tip) = self.branch_tip(req.branch)? {
+            // Not via `rev_parse`: that peels `^{commit}`, so asking it for a
+            // *tree* resolves nothing and the comparison silently never matches.
+            // The first version of this had exactly that bug, and it passed its
+            // test whenever two runs landed in the same second.
+            let same_tree = self.tree_of(&tip)?.as_deref() == Some(tree.as_str());
+            let same_parent = self.parents_of(&tip)? == vec![base.clone()];
+            if same_tree && same_parent {
+                return Ok(CommitOutcome { sha: tip, created: false });
+            }
+        }
+
+        // Author *and* committer, both cicada: the guard reads `%cn <%ce>` (#32),
+        // and an author that differed would make `git log` misleading for no gain.
+        let commit_env = [
+            ("GIT_AUTHOR_NAME", req.identity.name.clone()),
+            ("GIT_AUTHOR_EMAIL", req.identity.email.clone()),
+            ("GIT_COMMITTER_NAME", req.identity.name.clone()),
+            ("GIT_COMMITTER_EMAIL", req.identity.email.clone()),
+        ];
+
+        let sha = run_full(
+            &self.root,
+            &["commit-tree", &tree, "-p", &base, "-m", req.message],
+            &commit_env,
+            None,
+        )?
+        .trim()
+        .to_string();
+
+        run_full(
+            &self.root,
+            &["update-ref", &format!("refs/heads/{}", req.branch), &sha],
+            &[],
+            None,
+        )?;
+
+        Ok(CommitOutcome { sha, created: true })
+    }
+
     fn assert_not_shallow(&self) -> Result<(), GitError> {
         if self.git(&["rev-parse", "--is-shallow-repository"])?.trim() == "true" {
             return Err(GitError::ShallowClone);
         }
         Ok(())
+    }
+}
+
+/// Removes the private index whatever happens — including on the error paths,
+/// where leaving a stale index file in `.git` would be a small, confusing mess.
+struct TempIndex(PathBuf);
+
+impl Drop for TempIndex {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+impl GitCli {
+    /// The mode a path has in `rev`, if it is tracked there.
+    fn mode_of(&self, rev: &str, path: &str) -> Result<Option<String>, GitError> {
+        let out = run_opt(&self.root, &["ls-tree", "-z", rev, "--", path])?.unwrap_or_default();
+        // `<mode> <type> <sha>\t<path>\0`
+        Ok(out
+            .split('\0')
+            .find(|r| !r.trim().is_empty())
+            .and_then(|r| r.split_whitespace().next())
+            .map(str::to_string))
+    }
+
+    /// The tree a commit points at.
+    fn tree_of(&self, rev: &str) -> Result<Option<String>, GitError> {
+        Ok(run_opt(&self.root, &["rev-parse", "--verify", "--quiet", &format!("{rev}^{{tree}}")])?
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()))
+    }
+
+    fn parents_of(&self, rev: &str) -> Result<Vec<String>, GitError> {
+        Ok(run_opt(&self.root, &["log", "-1", "--format=%P", rev])?
+            .unwrap_or_default()
+            .split_whitespace()
+            .map(str::to_string)
+            .collect())
     }
 }
 

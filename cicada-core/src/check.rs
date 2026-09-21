@@ -249,6 +249,15 @@ pub fn validate_config(config: &Config) -> Vec<Finding> {
         seen_paths.push((name.as_str(), pkg.path.as_str()));
     }
 
+    // #55 — the identity the staleness guard reads back. A value that will not
+    // parse must fail here, not at the moment cicada tries to make a commit.
+    if let Err(e) = crate::identity::Identity::parse(&config.settings.committer) {
+        out.push(
+            Finding::problem("settings.committer", e.to_string())
+                .with_help("the shape is `Name <email>`, e.g. `cicada[bot] <cicada@users.noreply.github.com>`"),
+        );
+    }
+
     // release_pr_branch must template {branch}; whether its *rendered* form lands
     // inside the release allowlist needs a concrete branch, so that half is
     // `validate_release_pr_branch` below (#27).

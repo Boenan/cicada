@@ -189,6 +189,7 @@ adapters cheap instead of a rewrite.
 | 97 | A **derived** release (#22) still writes its changelog entry — never skipped. The notes context carries `derived_from` (the package and version that caused it), and the default template renders one line naming the cause when the release has no commits of its own. Core supplies the fact as data; the template decides the words (#46) |
 | 98 | An unknown scope is fatal **only on a commit that can release** (#11). A type whose section is `bump = "none"` has no attribution to get wrong, and `chore(deps): bump serde` — the design's own canonical non-releasable example (#36) — names no package on any repo. `check` reports it as a **warning**, so it stays visible without blocking a release |
 | 99 | Updater edits **fold** rather than collide. Two surgical updaters may write one file — a `values.yaml` holding both `image.tag` and `labels.version` is ordinary — so each transforms the content the run has so far, in config order (#31), and one `FileEdit` per path comes out. #44's hard error is narrowed to what genuinely cannot fold: a **whole-file** writer (`template`) sharing a path with anything |
+| 100 | The release commit is built with **git plumbing into a private index** — never by checking the release PR branch out. The working tree, the real index and the current branch are untouched. `--no-push` is the *local rehearsal* mode (§Goals 6), a failure between two checkouts would strand the run on the wrong branch, and two overlapping Phase A jobs in one workspace (D6) would corrupt each other's checkout |
 
 ---
 
@@ -275,6 +276,35 @@ Runs on every push to a branch matching `release_branches`.
    PR, apply `cicada:stale`, comment why, exit non-zero. Do not clobber.
 8. Reset `cicada/{branch}` to HEAD, write the edits, commit, force-push, upsert the PR/MR **with
    base = the branch cicada ran on**.
+
+### How the release commit is built (#100)
+
+"Reset the branch and commit the edits" describes the result, not the method, and the obvious method is
+wrong for this tool. Checking the release PR branch out, writing the files, committing and checking back
+fails in three separate ways:
+
+- **`--no-push` is the local rehearsal mode** (§Goals 6). A developer running it on their own machine must
+  get their tree back exactly as it was. A command that leaves you on another branch — or that refuses to
+  run because you have uncommitted work — is hostile precisely where it is meant to be safe.
+- **A failure between the two checkouts strands the run**, and the caller, on the wrong branch with edits
+  applied. Every error path would need to unwind a checkout.
+- **Two overlapping Phase A jobs in one workspace would corrupt each other** (D6). The design already
+  expects concurrent runs and calls the force-push race self-correcting; a checkout race is not.
+
+So the commit is assembled with plumbing: a **private index** seeded from HEAD's tree, the edits hashed into
+it, a tree written, a commit created with `commit-tree`, and the ref moved with `update-ref`. Nothing
+observable changes except the branch. The developer's staged and unstaged work is not merely preserved — it
+is never consulted, so uncommitted edits cannot be swept into a release.
+
+Three details that follow:
+
+- **File modes are read from the base tree**, not hard-coded. A Makefile or shell script carrying a marker
+  comment (#50) is exactly the file most likely to be executable, and `100644` would silently un-execute it.
+- **Content is hashed with `--path`**, so a repo with gitattributes filters (`* text=auto`) gets the bytes
+  git would have stored had a human run `git add`.
+- **A run that changes nothing creates nothing.** If the branch already points at a commit with this exact
+  tree and parent, cicada returns it rather than minting a fresh sha for identical content — the timestamp
+  alone would otherwise guarantee a new commit and a pointless force-push on every run.
 
 ### The release PR branch is replaced, never updated
 
@@ -1587,7 +1617,7 @@ Two sequencing principles, both learned from the decisions above:
 | **M0** | Workspace (`cicada-core` pure + `cicada`), config parsing, `GitBackend` + subprocess impl, conventional-commit parser (multi-scope, breaking, footers). ~~Spike: span-preserving YAML splice~~ **done** | `cicada check` lints a range with did-you-mean suggestions. ✅ Spike complete: `spikes/yaml-splice`, 15 cases green |
 | **M1** | Anchor resolution (per-package ranges, tag reachability), scope routing incl. `default_scope`, bump computation (section `bump`, first-release table, `pre_major`, `maintenance` guard), umbrella aggregation, `Plan`. **done** | ✅ `cicada plan --json` correct on a fixture **monorepo and a single-package repo through the same code path**, fully offline. 111 tests green. One gap: a branch matching `prerelease_branches` refuses rather than reporting a stable version |
 | **M2** | Updaters (cargo, helm, generic path + marker, template), minijinja notes template with three contexts + filters + `template print`, changelog marker insert/create, versions-file write, `FileEdit` boundary. **done** | ✅ `release-pr --dry-run` prints exactly the diff it would write; duplicate-output and re-parse checks fire. 198 tests green |
-| **M3** | Git write path: release PR branch reset/commit, committer identity, `release_branches` allowlist, templated `release_pr_branch`, `--no-push` end to end | **`release-pr --no-push` produces a real local release commit**, inspectable with `git show`. First dogfooding gate — no token, no network |
+| **M3** | Git write path: release PR branch reset/commit, committer identity, `release_branches` allowlist, templated `release_pr_branch`, `--no-push` end to end. **done** | ✅ **`release-pr --no-push` produces a real local release commit**, inspectable with `git show`, with the working tree untouched (#100). The #32 staleness refusal and the #80 collision check both fire. 216 tests green |
 | **M4** | `Forge` trait (9 methods) + GitHub adapter, upsert by head branch, auth via `GIT_ASKPASS`, retries/error mapping, **staleness model** (committer guard, draft, comment, close on empty plan) | Real release PR on GitHub; hand-editing the release PR branch makes cicada refuse, draft the PR, and fail loudly |
 | **M5** | Phase B: tag reconciliation (reachability + collision), **independent release-object reconciliation**, stale-merge detection, release manifest (disk + embedded), `cicada run` ordering | merge → tag → release; re-run is a no-op; a simulated failed release call self-heals on the next run; a maintenance branch releases independently of `main` |
 | **M6** | GitLab adapter (REST v4, draft-as-title-prefix, self-hosted `api_url`) | Same flow green on GitLab |

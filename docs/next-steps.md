@@ -9,14 +9,15 @@ next* and *what is easy to get wrong*.
 
 | | |
 |---|---|
-| **Design** | Complete. `docs/design.md`, 99 numbered decisions, every section walked and argued through. **No open questions** |
+| **Design** | Complete. `docs/design.md`, 100 numbered decisions, every section walked and argued through. **No open questions** |
 | **Behavioural coverage** | `docs/scenarios/single-service.md` (~140 scenarios, groups A–N) and `docs/scenarios/monorepo.md` (groups O–Y, only what needs N > 1), in five-surface form, doubling as the acceptance suite. Four HTML walkthroughs under `docs/scenarios/single-service/` |
 | **Deferred scope** | `docs/future-work.md`, 16 items, each with why it was deferred and what would trigger it |
 | **M0 spike** | **Done and confirmed.** `spikes/yaml-splice`, 15 tests green |
 | **M0** | **Done.** Two-crate workspace, config parsing, `GitBackend` + subprocess impl, conventional-commit parser, `cicada check`. 52 tests green |
 | **M1** | **Done.** Versions file, scope routing, bump computation, chart tracking, umbrella aggregation, anchor resolution, `Plan`, `cicada plan [--json]` |
-| **M2** | **Done.** Updaters (cargo, helm, generic path + marker, template), templates with three contexts + filters + `template print`, changelog insertion, versions-file write, the `FileEdit` boundary, `release-pr --dry-run`. 198 tests green. One gap: prereleases — see below |
-| **Production code** | `cicada-core/` (pure) and `cicada/` (lib + bin). Next milestone is M3 |
+| **M2** | **Done.** Updaters (cargo, helm, generic path + marker, template), templates with three contexts + filters + `template print`, changelog insertion, versions-file write, the `FileEdit` boundary, `release-pr --dry-run` |
+| **M3** | **Done.** The git write path: release PR branch, committer identity, the #32 refusal, the #80 collision check, `--no-push` end to end. 216 tests green. One gap: prereleases — see below |
+| **Production code** | `cicada-core/` (pure) and `cicada/` (lib + bin). Next milestone is M4 |
 
 **The scenario pass rewrote parts of the design.** Decisions #73–#85 all came out of writing expected
 outcomes down, and four earlier decisions were reversed outright — see *Do not re-litigate* below, and note
@@ -230,6 +231,48 @@ What landed, and where:
 
 ---
 
+## M3 is done — and it is the first genuinely useful build
+
+**Exit criterion met:** `cicada release-pr --no-push` produces a real local release commit on
+`cicada/{branch}`, inspectable with `git show`. No token, no network, nothing pushed. cicada does this on its
+own repo: `git show cicada/main` shows `CHANGELOG.md` and `.cicada-versions.toml` at `0.1.0`, authored by
+`cicada[bot]`.
+
+What landed, and where:
+
+| Piece | Location |
+|---|---|
+| Commit identity, parsed and validated (#55) | `cicada-core/src/identity.rs` |
+| `commit_edits`, `branch_tip`, `committer_of` — the write half | `cicada/src/git/{mod,subprocess}.rs` |
+| The #32 refusal, the #80 collision check, the commit message | `cicada/src/main.rs` |
+
+**The write path does not check anything out** — now #100, and the most consequential thing this milestone
+settled. The obvious implementation (check out `cicada/main`, write, commit, check back) fails three ways:
+`--no-push` is the *local rehearsal* mode, so a developer must get their tree back; a failure between the two
+checkouts strands the run on the wrong branch; and two overlapping Phase A jobs in one workspace (D6) would
+corrupt each other. Instead a **private index** is seeded from HEAD's tree, the edits are hashed into it, and
+`commit-tree` + `update-ref` do the rest. A test asserts the property that buys: a developer's staged and
+unstaged work is never consulted, so uncommitted edits cannot be swept into a release.
+
+**Three things the build settled that the design had left implicit:**
+
+1. **File modes come from the base tree.** Hard-coding `100644` in `update-index` silently un-executes a
+   shell script — and a script carrying a marker comment (#50) is exactly the file most likely to be
+   executable. Caught by a test that sets the bit on disk; an earlier version of that test set it in the
+   index, where a later `git add -A` undid it and the test passed for the wrong reason.
+2. **A run that changes nothing must create nothing.** The timestamp alone guarantees a new sha for
+   identical content, so without a tree-and-parent check every re-run force-pushes a fresh commit and "did
+   anything change?" stops being answerable from outside.
+3. **Both refusals fire under `--dry-run` too.** A rehearsal that reports success where the real run would
+   refuse is a rehearsal that lies, which is the same standard #30 sets for the diff.
+
+**One real bug, found by a test that had been passing:** the idempotency check asked `rev_parse` for a
+*tree*, and `rev_parse` peels `^{commit}` — so it resolved nothing and the comparison never matched. The CLI
+test passed anyway, because two runs inside one second produce the same sha regardless. The direct
+`GitBackend` test is what caught it, and the CLI test now asserts the output wording rather than only the sha.
+
+---
+
 ## Constraints that are easy to violate
 
 These are cheap to honour from the start and expensive to retrofit:
@@ -254,6 +297,8 @@ These are cheap to honour from the start and expensive to retrofit:
 | #88 | `initial_version` is required on a package with a `helm` updater, and `Chart.yaml` is still never read back (#75). The requirement exists so cicada never invents a chart's first version |
 | #97 | A derived release still writes a changelog entry. It has no commits, so the body comes from `derived_from` in the notes context — never an empty entry, never a skipped one, and never prose emitted by core |
 | #96 | Releases are created in config order, umbrella last. Deterministic ordering is what makes the forge-call log assertable, and the umbrella's body embeds a manifest describing the releases created before it |
+| #100 | The release commit is built through a **private index**, never a checkout. The working tree, the real index and the current branch stay exactly as they were. Reintroducing a checkout breaks local rehearsal, error unwinding and concurrent runs at once |
+| #32 | The staleness refusal and the #80 collision check run under `--dry-run` as well. A rehearsal that reports success where the real run refuses is worse than no rehearsal |
 | #99 | Updater edits **fold**, one `FileEdit` per path, in config order. Emitting one edit per *updater* reintroduces last-writer-wins — the exact bug #44 names — and it is silent. The hard error is only for a whole-file writer sharing a path |
 | #52 | Every edited file is re-parsed **before anything is written**. The check is inside the transform, so a bad splice cannot reach the working tree even on the path that writes without committing |
 | #98 | An unknown scope is fatal only on a commit that **can release**. Widening it back to every commit breaks every repo whose dependency bot writes `chore(deps):` — including this design's own worked example (B8/B9). Narrowing it further, so a releasable commit's bad scope is tolerated, is the silent misfiling #11 exists to prevent |
@@ -340,26 +385,28 @@ Four features were removed rather than deferred quietly, and two of them change 
 
 ---
 
-## Next: M3
+## Next: M4
 
-The git write path: reset the release PR branch, write the edits, commit as the configured committer, and
-`--no-push` end to end. Exit criterion: **`release-pr --no-push` produces a real local release commit**,
-inspectable with `git show`. This is the first dogfooding gate — no token, no network.
+The `Forge` trait (nine methods, #53) plus the GitHub adapter: upsert by head branch, auth via `GIT_ASKPASS`,
+retries and error mapping, and the staleness model's forge half. Exit criterion: a real release PR on GitHub,
+and hand-editing the release PR branch makes cicada refuse, draft the PR, and fail loudly.
 
-M2 leaves one function to call. `cicada::prepare::apply` already writes a `Vec<FileEdit>` to the tree; what
-M3 adds around it is branch and commit management:
+M3 leaves the local half of all of that done:
 
-- **The write half of `GitBackend`.** `branch_reset`, `add`, `commit_as`, `tag`, `push` — the read half
-  (`log`, `rev_parse`, `is_ancestor`, `tags`, `remote_url`) is done and tested.
-- **The release PR branch is replaced, never updated** (#27, #32). Reset `cicada/{branch}` to HEAD, write,
-  commit, force-push. Nothing is ever merged *into* it, so there is never a conflict to resolve — the branch
-  holds exactly one commit that is a pure function of the current repo state.
-- **The committer identity is load-bearing** (#55). #32 decides whether to clobber the branch by asking
-  whether its tip is cicada's own commit, so the identity must be configurable and stable across versions.
-- **H5 becomes assertable for real.** The test the design asks for is that the `Vec<FileEdit>` from
-  `--dry-run` and from `--no-push` are *equal*. M2 asserts the dry-run half; M3 closes it.
+- **The refusal already works** (#32) — it exits `4` and explains itself. M4 adds the forge consequences:
+  `set_draft(true)`, `set_labels(["cicada:stale"])` and `comment(<why>)`, which are what make the stale PR
+  *unmergeable* rather than merely unrefreshed (layer 2).
+- **The push is the only git operation left.** `commit_edits` writes the branch; `push --force-with-lease`
+  is one method beside it, and the token goes in through `GIT_ASKPASS` and never into `argv` or
+  `.git/config` (#18).
+- **`find_pull_request` keys on the head branch**, never the title (#77) — that is what makes the upsert
+  idempotent and stops two concurrent runs opening two PRs.
+- **The empty-plan path grows a forge call** (#34, D5a/D5b): `find_pull_request` once, and
+  `close_pull_request` only if one is open. On a quiet repo that is the most-executed path in the tool.
+- **The PR body is already rendered.** `Rendered.notes` carries the exact string the changelog entry used
+  (#43), so the release body must reuse it rather than render its own.
 
-Delete the `anyhow::bail!` at the end of `cmd_release_pr` — it names M3 explicitly and is the seam.
+Delete the `anyhow::bail!` in `cmd_release_pr` that names M4 — it is the seam.
 
 ---
 

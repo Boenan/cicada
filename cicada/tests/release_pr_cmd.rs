@@ -98,6 +98,35 @@ impl Fixture {
     fn dirty(&self) -> String {
         self.git(&["status", "--porcelain"])
     }
+
+    fn no_push(&self) -> std::process::Output {
+        self.cicada(&["release-pr", "--no-push", "--date", "2026-09-21"])
+    }
+
+    fn branch_tip(&self, branch: &str) -> Option<String> {
+        let out = Command::new("git")
+            .args(["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")])
+            .current_dir(&self.dir)
+            .output()
+            .unwrap();
+        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if out.status.success() && !s.is_empty() { Some(s) } else { None }
+    }
+
+    /// The file's content as of a given ref, straight out of the object store —
+    /// the only honest way to assert what a commit contains when the working tree
+    /// was deliberately never touched.
+    fn show(&self, rev: &str, path: &str) -> String {
+        self.git(&["show", &format!("{rev}:{path}")])
+    }
+
+    fn log_format(&self, rev: &str, fmt: &str) -> String {
+        self.git(&["log", "-1", &format!("--format={fmt}"), rev]).trim().to_string()
+    }
+
+    fn count_commits(&self, rev: &str) -> usize {
+        self.git(&["rev-list", "--count", rev]).trim().parse().unwrap()
+    }
 }
 
 impl Drop for Fixture {
@@ -296,21 +325,24 @@ fn template_print_names_the_alternatives_when_asked_for_one_that_does_not_exist(
     assert!(stderr(&out).contains("notes"), "{}", stderr(&out));
 }
 
-// --- the write path is not here yet --------------------------------------
+// --- the push and the pull request are not here yet ----------------------
 
 #[test]
-fn without_dry_run_the_command_says_what_is_missing_rather_than_half_doing_it() {
-    let f = Fixture::new("m3", SHAPE_1);
+fn a_full_run_says_what_is_missing_rather_than_half_doing_it() {
+    let f = Fixture::new("m4", SHAPE_1);
     f.write("Cargo.toml", CARGO);
     f.git(&["add", "-A"]);
     f.git(&["commit", "-m", "chore: manifest"]);
     f.commit("feat: add export");
 
-    let out = f.cicada(&["release-pr", "--no-push"]);
+    let out = f.cicada(&["release-pr"]);
     assert_eq!(code(&out), 1);
-    assert!(stderr(&out).contains("M3"), "{}", stderr(&out));
-    // And it wrote nothing on the way to saying so.
-    assert!(!f.dir.join("CHANGELOG.md").exists());
+    assert!(stderr(&out).contains("M4"), "{}", stderr(&out));
+    // It names the branch `--no-push` would write, so the way forward is in the
+    // message rather than in the docs.
+    assert!(stderr(&out).contains("cicada/main"), "{}", stderr(&out));
+    // And it created nothing on the way to saying so.
+    assert!(f.branch_tip("cicada/main").is_none());
 }
 
 // --- determinism ---------------------------------------------------------
@@ -329,4 +361,340 @@ fn the_same_inputs_produce_a_byte_identical_diff_across_processes() {
     for _ in 0..3 {
         assert_eq!(stdout(&f.dry_run()), first);
     }
+}
+
+// =========================================================================
+// M3 · the git write path
+//
+// Exit criterion: `release-pr --no-push` produces a real local release commit,
+// inspectable with `git show`. No token, no network, nothing pushed.
+// =========================================================================
+
+/// A fixture already at 1.4.2 with one unreleased `feat:` — the state almost
+/// every write-path assertion starts from.
+fn ready(name: &str) -> Fixture {
+    let f = Fixture::new(name, SHAPE_1);
+    f.write("Cargo.toml", CARGO);
+    f.git(&["add", "-A"]);
+    f.git(&["commit", "-m", "chore: manifest"]);
+    released(&f);
+    f.commit("feat: add export");
+    f
+}
+
+#[test]
+fn h6_no_push_produces_a_real_local_release_commit() {
+    let f = ready("nopush");
+    let main_before = f.branch_tip("main").unwrap();
+
+    let out = f.no_push();
+    assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
+
+    let tip = f.branch_tip("cicada/main").expect("the release PR branch exists");
+
+    // `git show cicada/main` displays the version bumps and the changelog entry.
+    assert!(f.show(&tip, "Cargo.toml").contains(r#"version = "1.5.0""#));
+    assert!(f.show(&tip, "CHANGELOG.md").contains("## 1.5.0 (2026-09-21)"));
+    assert!(f.show(&tip, "CHANGELOG.md").contains("* add export"));
+    assert!(f.show(&tip, ".cicada-versions.toml").contains(r#"version = "1.5.0""#));
+
+    // Exactly one commit on top of main, which has not moved.
+    assert_eq!(f.log_format(&tip, "%P"), main_before);
+    assert_eq!(f.branch_tip("main").unwrap(), main_before);
+    assert_eq!(f.count_commits(&tip), f.count_commits("main") + 1);
+}
+
+#[test]
+fn the_working_tree_is_never_touched_even_though_a_commit_was_made() {
+    // #100 — the whole reason the commit is built through a private index rather
+    // than by checking the branch out. `--no-push` is the *local rehearsal* mode,
+    // so a developer must get their tree back exactly as it was.
+    let f = ready("untouched");
+    let before = f.dirty();
+    let head_before = f.branch_tip("main").unwrap();
+
+    assert_eq!(code(&f.no_push()), 0);
+
+    assert_eq!(f.dirty(), before, "the working tree changed");
+    assert_eq!(f.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(), "main", "still on main");
+    assert_eq!(f.branch_tip("main").unwrap(), head_before);
+    // The edits exist in the commit and *only* there.
+    assert!(!f.dir.join("CHANGELOG.md").exists());
+    assert_eq!(f.read("Cargo.toml"), CARGO);
+}
+
+#[test]
+fn hash_55_the_commit_carries_the_configured_identity_as_author_and_committer() {
+    // #32's guard reads `%cn <%ce>` back, so this is not cosmetic.
+    let f = ready("identity");
+    assert_eq!(code(&f.no_push()), 0);
+    let tip = f.branch_tip("cicada/main").unwrap();
+
+    assert_eq!(f.log_format(&tip, "%cn <%ce>"), "cicada[bot] <cicada@users.noreply.github.com>");
+    assert_eq!(f.log_format(&tip, "%an <%ae>"), "cicada[bot] <cicada@users.noreply.github.com>");
+    // The subject is conventional and non-releasable (#41, #36), so cicada's own
+    // release commit cannot trigger a release on the next run.
+    assert_eq!(f.log_format(&tip, "%s"), "chore(release): prepare release");
+    assert!(f.log_format(&tip, "%b").contains("app 1.4.2 → 1.5.0"), "the body says what moved");
+}
+
+#[test]
+fn a_configured_identity_is_used_instead_of_the_default() {
+    let f = Fixture::new(
+        "identity2",
+        &SHAPE_1.replace(
+            "default_scope    = \"app\"",
+            "default_scope    = \"app\"\ncommitter        = \"Release Bot <bot@acme.test>\"",
+        ),
+    );
+    f.write("Cargo.toml", CARGO);
+    f.git(&["add", "-A"]);
+    f.git(&["commit", "-m", "chore: manifest"]);
+    f.commit("feat: add export");
+
+    assert_eq!(code(&f.no_push()), 0);
+    let tip = f.branch_tip("cicada/main").unwrap();
+    assert_eq!(f.log_format(&tip, "%cn <%ce>"), "Release Bot <bot@acme.test>");
+}
+
+#[test]
+fn a_committer_that_is_not_a_name_email_pair_is_a_config_finding() {
+    let f = Fixture::new(
+        "identity3",
+        &SHAPE_1.replace(
+            "default_scope    = \"app\"",
+            "default_scope    = \"app\"\ncommitter        = \"just a name\"",
+        ),
+    );
+    let out = f.cicada(&["check"]);
+    assert_eq!(code(&out), 3);
+    assert!(stdout(&out).contains("settings.committer"), "{}", stdout(&out));
+}
+
+#[test]
+fn d1_the_branch_is_replaced_not_updated() {
+    let f = ready("replace");
+    assert_eq!(code(&f.no_push()), 0);
+    let first = f.branch_tip("cicada/main").unwrap();
+    assert!(f.show(&first, "CHANGELOG.md").contains("## 1.5.0"));
+
+    // A breaking change lands on main; the next run recomputes from scratch.
+    f.commit("feat!: drop the v1 endpoints");
+    assert_eq!(code(&f.no_push()), 0);
+    let second = f.branch_tip("cicada/main").unwrap();
+
+    assert_ne!(first, second);
+    assert!(f.show(&second, "CHANGELOG.md").contains("## 2.0.0"), "recomputed, not amended");
+    // Still exactly one commit, parented on main — nothing was merged or rebased,
+    // and the first release commit is unreachable from the second.
+    assert_eq!(f.log_format(&second, "%P"), f.branch_tip("main").unwrap());
+    assert_eq!(f.count_commits(&second), f.count_commits("main") + 1);
+    let reachable = f.git(&["rev-list", &second]);
+    assert!(!reachable.contains(&first), "the discarded commit must not be an ancestor");
+}
+
+#[test]
+fn re_running_with_nothing_changed_creates_no_new_commit() {
+    // Without the tree-and-parent check, the timestamp alone mints a fresh sha for
+    // identical content on every run, and "did anything change?" stops being
+    // answerable from the outside.
+    let f = ready("idem");
+    let out = f.no_push();
+    assert_eq!(code(&out), 0);
+    assert!(stdout(&out).contains("committed"), "{}", stdout(&out));
+    let first = f.branch_tip("cicada/main").unwrap();
+
+    let again = f.no_push();
+    assert_eq!(code(&again), 0);
+    // Asserted on the word as well as the sha: two runs inside one second would
+    // produce the same sha anyway, so the sha alone is not evidence.
+    assert!(stdout(&again).contains("unchanged"), "{}", stdout(&again));
+    assert_eq!(f.branch_tip("cicada/main").unwrap(), first);
+}
+
+/// The `+` lines the diff printed for one file, reassembled into content.
+///
+/// For a file the run *creates*, every line is an addition — so this is the whole
+/// file, and comparing it against the committed blob is a genuine byte-level
+/// check rather than a substring spot-check.
+fn added_lines(diff: &str, path: &str) -> String {
+    let start = diff
+        .find(&format!("+++ new {path}\n"))
+        .unwrap_or_else(|| panic!("no creation section for {path} in:\n{diff}"));
+    let body = &diff[start..];
+    // Sections are separated by a blank line before the next header.
+    let end = body[1..].find("\n---").map(|i| i + 1).unwrap_or(body.len());
+    let end = body[1..].find("\n+++").map(|i| (i + 1).min(end)).unwrap_or(end);
+    body[..end]
+        .lines()
+        .filter_map(|l| l.trim_start().strip_prefix("+ ").map(str::to_string))
+        .map(|l| format!("{l}\n"))
+        .collect()
+}
+
+#[test]
+fn h5_dry_run_and_no_push_agree_byte_for_byte() {
+    // #30's actual guarantee, asserted the way the design asks: the two modes are
+    // the same computation with the write skipped, so the bytes must match.
+    let f = ready("agree");
+    let dry = stdout(&f.dry_run());
+    assert!(dry.contains("+ version = \"1.5.0\""), "{dry}");
+
+    assert_eq!(code(&f.no_push()), 0);
+    let tip = f.branch_tip("cicada/main").unwrap();
+
+    // `CHANGELOG.md` is created, so the diff's additions are its entire content.
+    let from_diff = added_lines(&dry, "CHANGELOG.md");
+    assert!(from_diff.contains("## 1.5.0 (2026-09-21)"), "{from_diff}");
+    assert_eq!(
+        f.show(&tip, "CHANGELOG.md"),
+        from_diff,
+        "the diff and the commit disagree — `--dry-run` is describing a different computation"
+    );
+}
+
+// --- #32 · refusing to clobber -------------------------------------------
+
+#[test]
+fn d2_a_human_commit_on_the_release_branch_is_refused_and_the_branch_is_untouched() {
+    let f = ready("stale");
+    assert_eq!(code(&f.no_push()), 0);
+
+    // A human adds a commit on cicada's branch. It exists nowhere else, so
+    // discarding it would lose it.
+    f.git(&["checkout", "-q", "cicada/main"]);
+    f.write("HOTFIX.txt", "by hand");
+    f.git(&["add", "-A"]);
+    f.git(&["commit", "-m", "chore: tweak the release by hand"]);
+    f.git(&["checkout", "-q", "main"]);
+    let tip_before = f.branch_tip("cicada/main").unwrap();
+
+    f.commit("fix: something else");
+    let out = f.no_push();
+
+    assert_eq!(code(&out), 4, "refused, not broken (#68): {}", stderr(&out));
+    assert_eq!(f.branch_tip("cicada/main").unwrap(), tip_before, "the branch must be untouched");
+    let e = stderr(&out);
+    assert!(e.contains("cicada did not write"), "{e}");
+    assert!(e.contains("exists nowhere else"), "it says why, not just that: {e}");
+}
+
+#[test]
+fn d2_the_refusal_also_fires_under_dry_run() {
+    // A rehearsal that reports success where the real run would refuse is a
+    // rehearsal that lies.
+    let f = ready("stale2");
+    assert_eq!(code(&f.no_push()), 0);
+    f.git(&["checkout", "-q", "cicada/main"]);
+    f.write("HOTFIX.txt", "by hand");
+    f.git(&["add", "-A"]);
+    f.git(&["commit", "-m", "chore: by hand"]);
+    f.git(&["checkout", "-q", "main"]);
+    f.commit("fix: something else");
+
+    assert_eq!(code(&f.dry_run()), 4);
+}
+
+#[test]
+fn d3_removing_the_human_commit_lets_the_next_run_proceed() {
+    let f = ready("recover");
+    assert_eq!(code(&f.no_push()), 0);
+    let cicadas = f.branch_tip("cicada/main").unwrap();
+
+    f.git(&["checkout", "-q", "cicada/main"]);
+    f.write("HOTFIX.txt", "by hand");
+    f.git(&["add", "-A"]);
+    f.git(&["commit", "-m", "chore: by hand"]);
+    f.git(&["checkout", "-q", "main"]);
+    assert_eq!(code(&f.no_push()), 4);
+
+    // Reset the branch back to cicada's own commit and it recovers.
+    f.git(&["branch", "-f", "cicada/main", &cicadas]);
+    assert_eq!(code(&f.no_push()), 0);
+}
+
+// --- #80 / G4 · the collision check, in Phase A --------------------------
+
+#[test]
+fn g4_a_version_whose_tag_exists_unreachably_refuses_before_any_branch_is_written() {
+    let f = ready("collide");
+    // `v1.5.0` was cut on another line, so it is not reachable from main.
+    f.git(&["checkout", "-q", "-b", "other"]);
+    f.commit("feat: released over there");
+    f.git(&["tag", "v1.5.0"]);
+    f.git(&["checkout", "-q", "main"]);
+
+    let out = f.no_push();
+    assert_eq!(code(&out), 4, "stderr: {}", stderr(&out));
+    let e = stderr(&out);
+    assert!(e.contains("v1.5.0"), "{e}");
+    assert!(e.contains("converging"), "{e}");
+    // Discovering this in Phase B would mean the PR was already reviewed and
+    // merged; here, no branch is written at all.
+    assert!(f.branch_tip("cicada/main").is_none());
+}
+
+#[test]
+fn a_tag_that_is_reachable_is_not_a_collision() {
+    // The rule is *unreachable* (#80). A reachable tag is this branch's own
+    // history, and refusing on it would refuse every ordinary release.
+    let f = ready("noncollide");
+    f.git(&["tag", "v1.4.2-something-else"]);
+    assert_eq!(code(&f.no_push()), 0);
+}
+
+// --- G3 · the templated head branch --------------------------------------
+
+#[test]
+fn g3_a_slashed_branch_keeps_its_slash_in_the_rendered_head() {
+    // `cicada/release/1.4`, not `cicada/release-1.4`: flattening would map
+    // `release/1.4` and a hypothetical `release-1.4` onto one head branch (#27).
+    let config = SHAPE_1.replace(r#"release_branches = ["main"]"#, r#"release_branches = ["main", "release/*"]"#);
+    let f = Fixture::new("slash", &config);
+    f.write("Cargo.toml", CARGO);
+    f.git(&["add", "-A"]);
+    f.git(&["commit", "-m", "chore: manifest"]);
+    f.git(&["checkout", "-q", "-b", "release/1.4"]);
+    f.commit("fix: handle nil");
+
+    assert_eq!(code(&f.no_push()), 0);
+    assert!(f.branch_tip("cicada/release/1.4").is_some());
+    // And the rendered head is outside every release pattern, which is what stops
+    // cicada's own push re-triggering it.
+    assert!(f.branch_tip("cicada/main").is_none());
+}
+
+// --- file modes ----------------------------------------------------------
+
+#[test]
+fn an_executable_file_stays_executable_through_a_marker_edit() {
+    // A Makefile or shell script carrying `# x-cicada-version` (#50) is exactly
+    // the file most likely to be executable, and hard-coding 100644 in the index
+    // would silently un-execute it.
+    let config = format!(
+        "{SHAPE_1}\n[[packages.app.updaters]]\nkind = \"generic\"\npath = \"release.sh\"\nedit = {{ marker = \"x-cicada-version\" }}\n"
+    );
+    let f = Fixture::new("mode", &config);
+    f.write("Cargo.toml", CARGO);
+    f.write("release.sh", "#!/bin/sh\nVERSION=1.4.2 # x-cicada-version\n");
+    // Set the bit on disk rather than in the index: `released()` runs another
+    // `git add -A`, which re-reads the mode from the file and would undo an
+    // index-only `--chmod=+x`.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(f.dir.join("release.sh"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+    }
+    f.git(&["add", "-A"]);
+    f.git(&["commit", "-m", "chore: script"]);
+    released(&f);
+    f.commit("feat: add export");
+
+    assert_eq!(code(&f.no_push()), 0);
+    let tip = f.branch_tip("cicada/main").unwrap();
+    assert!(f.show(&tip, "release.sh").contains("VERSION=1.5.0"));
+
+    let entry = f.git(&["ls-tree", &tip, "--", "release.sh"]);
+    assert!(entry.starts_with("100755"), "the executable bit was dropped: {entry}");
 }

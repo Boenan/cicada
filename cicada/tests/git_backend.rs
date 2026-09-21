@@ -248,3 +248,133 @@ fn discover_finds_the_root_from_a_subdirectory() {
         "config and paths resolve from the repo root, not the cwd"
     );
 }
+
+// --- the write half (M3) -------------------------------------------------
+
+use cicada::git::CommitRequest;
+use cicada_core::Identity;
+use cicada_core::edit::{EditSource, FileEdit};
+
+fn bot() -> Identity {
+    Identity::parse("cicada[bot] <cicada@users.noreply.github.com>").unwrap()
+}
+
+fn edit(path: &str, content: &str) -> FileEdit {
+    FileEdit { path: path.into(), content: content.into(), source: EditSource::VersionsFile }
+}
+
+/// One release commit onto `cicada/main` from HEAD, which is what every case
+/// below varies one thing about.
+fn commit_one(
+    git: &GitCli,
+    base: &str,
+    edits: &[FileEdit],
+) -> Result<cicada::git::CommitOutcome, cicada::git::GitError> {
+    git.commit_edits(&CommitRequest {
+        branch: "cicada/main",
+        base,
+        edits,
+        message: "chore(release): prepare release",
+        identity: &bot(),
+    })
+}
+
+#[test]
+fn commit_edits_creates_the_branch_and_leaves_the_working_tree_alone() {
+    let r = TempRepo::new("write-basic");
+    r.commit("chore: init");
+    let head = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    let before = r.git(&["status", "--porcelain"]);
+
+    let git = GitCli::discover(&r.dir).unwrap();
+    let out = commit_one(&git, "HEAD", &[edit("VERSION", "1.5.0\n")]).unwrap();
+
+    assert!(out.created);
+    assert_eq!(git.branch_tip("cicada/main").unwrap().as_deref(), Some(out.sha.as_str()));
+    assert_eq!(r.git(&["show", &format!("{}:VERSION", out.sha)]), "1.5.0\n");
+    assert_eq!(r.git(&["log", "-1", "--format=%P", &out.sha]).trim(), head);
+
+    // Nothing observable changed except the branch (#100).
+    assert_eq!(r.git(&["status", "--porcelain"]), before);
+    assert_eq!(r.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(), "main");
+    assert!(!r.dir.join("VERSION").exists(), "the file exists in the commit, not on disk");
+}
+
+#[test]
+fn uncommitted_work_in_the_tree_never_leaks_into_the_release_commit() {
+    // The property the private index buys, and the one that would be silently
+    // wrong under a checkout-and-commit implementation: a developer's half-finished
+    // edits must not be swept into a release.
+    let r = TempRepo::new("write-dirty");
+    std::fs::write(r.dir.join("src.txt"), "committed\n").unwrap();
+    r.git(&["add", "-A"]);
+    r.git(&["commit", "-m", "chore: init"]);
+
+    // Dirty the tree, and stage part of it, the way a developer mid-task would.
+    std::fs::write(r.dir.join("src.txt"), "HALF FINISHED\n").unwrap();
+    std::fs::write(r.dir.join("scratch.txt"), "notes\n").unwrap();
+    r.git(&["add", "src.txt"]);
+
+    let git = GitCli::discover(&r.dir).unwrap();
+    let out = commit_one(&git, "HEAD", &[edit("VERSION", "1.5.0\n")]).unwrap();
+
+    // The release commit holds HEAD's tree plus the edits — not the tree.
+    assert_eq!(r.git(&["show", &format!("{}:src.txt", out.sha)]), "committed\n");
+    assert_eq!(r.git(&["show", &format!("{}:VERSION", out.sha)]), "1.5.0\n");
+    assert!(
+        r.git(&["ls-tree", "-r", "--name-only", &out.sha]).lines().all(|l| l != "scratch.txt"),
+        "an untracked file was swept in"
+    );
+
+    // And the developer's staging area is exactly as they left it.
+    assert_eq!(std::fs::read_to_string(r.dir.join("src.txt")).unwrap(), "HALF FINISHED\n");
+    let staged = r.git(&["diff", "--cached", "--name-only"]);
+    assert_eq!(staged.trim(), "src.txt", "the real index was disturbed");
+}
+
+#[test]
+fn a_second_call_with_the_same_content_creates_nothing() {
+    let r = TempRepo::new("write-idem");
+    r.commit("chore: init");
+    let git = GitCli::discover(&r.dir).unwrap();
+
+    let first = commit_one(&git, "HEAD", &[edit("VERSION", "1.5.0\n")]).unwrap();
+    assert!(first.created);
+
+    let second = commit_one(&git, "HEAD", &[edit("VERSION", "1.5.0\n")]).unwrap();
+    assert!(!second.created, "identical content should not mint a new sha");
+    assert_eq!(second.sha, first.sha);
+
+    // Different content does create one.
+    let third = commit_one(&git, "HEAD", &[edit("VERSION", "1.6.0\n")]).unwrap();
+    assert!(third.created);
+    assert_ne!(third.sha, first.sha);
+}
+
+#[test]
+fn branch_tip_and_committer_of_answer_the_staleness_guards_question() {
+    let r = TempRepo::new("write-guard");
+    r.commit("chore: init");
+    let git = GitCli::discover(&r.dir).unwrap();
+
+    assert_eq!(git.branch_tip("cicada/main").unwrap(), None);
+    let out = commit_one(&git, "HEAD", &[edit("VERSION", "1.5.0\n")]).unwrap();
+
+    assert_eq!(git.branch_tip("cicada/main").unwrap().as_deref(), Some(out.sha.as_str()));
+    // Exactly the string #32 compares against, so `Identity::to_git` round-trips
+    // through git's own `%cn <%ce>`.
+    assert_eq!(git.committer_of(&out.sha).unwrap().as_deref(), Some(bot().to_git().as_str()));
+    // The human commit on `main` is not cicada's.
+    assert_eq!(git.committer_of("main").unwrap().as_deref(), Some("Test <test@example.invalid>"));
+}
+
+#[test]
+fn a_base_that_does_not_resolve_is_an_error_rather_than_an_empty_commit() {
+    let r = TempRepo::new("write-nobase");
+    r.commit("chore: init");
+    let git = GitCli::discover(&r.dir).unwrap();
+
+    let err = commit_one(&git, "refs/heads/nope", &[edit("VERSION", "1.5.0\n")]).unwrap_err();
+    assert!(err.to_string().contains("does not resolve"), "{err}");
+    assert_eq!(git.branch_tip("cicada/main").unwrap(), None);
+}

@@ -237,9 +237,12 @@ pub fn render_diff(
     out
 }
 
-pub fn summarise_edits(style: &Style, n: usize) -> String {
+/// `would` for a rehearsal, `were` once it has happened. The distinction is the
+/// only thing separating the two modes, so the output says which one ran.
+pub fn summarise_edits(style: &Style, n: usize, written: bool) -> String {
     if n == 0 {
         return format!("  {}\n", style.dim("nothing to release"));
     }
-    format!("  {} file{} would be written\n", n, plural(n))
+    let verb = if written { "written" } else { "would be written" };
+    format!("  {} file{} {verb}\n", n, plural(n))
 }

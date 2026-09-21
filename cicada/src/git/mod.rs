@@ -19,6 +19,49 @@ pub use subprocess::GitCli;
 
 use cicada_core::{CommitSource, RawCommit};
 
+/// One release commit, to be built without disturbing anything.
+///
+/// The branch cicada writes is **not** the branch it is standing on, and the
+/// obvious implementation — check out the release PR branch, write the files,
+/// commit, check back — is wrong for this tool in three separate ways (#100):
+///
+/// * `--no-push` is the *local rehearsal* mode (§Goals 6), so a developer running
+///   it on their own machine must get their tree back exactly as it was. A
+///   command that leaves you on another branch is hostile precisely where it is
+///   meant to be safe.
+/// * a failure between the two checkouts strands the run — and the caller — on
+///   the wrong branch, with edits applied.
+/// * two overlapping Phase A runs in one workspace (D6) would corrupt each
+///   other's checkout. Built through a private index they cannot interact at all.
+///
+/// So the commit is assembled with plumbing: a temporary index seeded from
+/// `base`, the edits hashed into it, a tree written, a commit created, and the
+/// ref moved. Nothing observable changes except the branch.
+pub struct CommitRequest<'a> {
+    /// The ref to move, e.g. `cicada/main` — a short branch name, not `refs/…`.
+    pub branch: &'a str,
+    /// The commit whose tree the edits are applied to, and the new commit's
+    /// parent. Always HEAD in Phase A: the branch is **replaced, never updated**
+    /// (#27, D1), so nothing is merged or rebased and there is never a conflict.
+    pub base: &'a str,
+    pub edits: &'a [cicada_core::edit::FileEdit],
+    pub message: &'a str,
+    pub identity: &'a cicada_core::Identity,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitOutcome {
+    pub sha: String,
+    /// `false` when the branch already pointed at a commit with this exact tree
+    /// and parent, so nothing was created.
+    ///
+    /// Re-running Phase A on an unchanged repo would otherwise mint a new commit
+    /// every time — identical content under a new sha, because the timestamp
+    /// moved — and force-push it. Harmless but noisy, and it makes "did anything
+    /// change?" unanswerable from the outside.
+    pub created: bool,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum GitError {
     #[error("`git` was not found on PATH — cicada shells out to git, so it is a required runtime dependency")]
@@ -69,6 +112,20 @@ pub trait GitBackend {
 
     /// Checked up front so a truncated history is never mistaken for a short one.
     fn assert_not_shallow(&self) -> Result<(), GitError>;
+
+    /// The commit a branch points at, or `None` when the branch does not exist.
+    fn branch_tip(&self, branch: &str) -> Result<Option<String>, GitError>;
+
+    /// The `Name <email>` that committed `rev` — what #32's guard compares
+    /// against to decide whether a release PR branch is cicada's to replace.
+    fn committer_of(&self, rev: &str) -> Result<Option<String>, GitError>;
+
+    /// Build a commit containing `base`'s tree plus `edits`, parented on `base`,
+    /// and point `branch` at it.
+    ///
+    /// **The working tree and the real index are never touched** (#100). See
+    /// [`CommitRequest`] for why that matters more than it looks.
+    fn commit_edits(&self, req: &CommitRequest<'_>) -> Result<CommitOutcome, GitError>;
 
     /// A remote's URL, or `None` when the remote is not configured.
     ///
