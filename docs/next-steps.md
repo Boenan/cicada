@@ -447,6 +447,31 @@ protocols through the recording fake.
 
 ---
 
+## M7 is done
+
+`README.md`, `action.yml`, `ci/gitlab-ci.yml`, and the two workflows this repository runs on itself.
+
+**The adoption claim is mechanical.** "A third party can adopt from the README alone" is a claim about
+documentation, and documentation rots silently — so `cicada/tests/shipped_assets.rs` parses every config the
+README shows with the *real* parser, parses every shipped YAML asset with cicada's *own* YAML reader, and
+asserts the CI-trigger footgun is in the first third of the file rather than a footnote. The failure it
+prevents is specific: a config key renamed, every test updated, and the README left telling adopters to
+write the old one.
+
+Every command in the Quick start was also walked verbatim against a scratch repo — `check`, `plan`,
+`release-pr --dry-run`, `release-pr --no-push`, `git show`, and all four `template print` names.
+
+Two things worth knowing about the shipped assets:
+
+- **A composite action cannot set `concurrency:`.** That is workflow-level, so the action does the work and
+  the *documented workflow* carries the guard — along with `fetch-depth: 0`, which belongs to
+  `actions/checkout` and is the caller's step either way. The GitLab template has no such split and bakes in
+  both (`GIT_DEPTH: 0`, `resource_group`).
+- **The action's install step downloads a released binary**, so it depends on M8 publishing one. It uses an
+  already-installed `cicada` when the runner has it, and verifies `SHA256SUMS` when the release carries one.
+
+---
+
 ## Constraints that are easy to violate
 
 These are cheap to honour from the start and expensive to retrofit:
@@ -471,6 +496,7 @@ These are cheap to honour from the start and expensive to retrofit:
 | #88 | `initial_version` is required on a package with a `helm` updater, and `Chart.yaml` is still never read back (#75). The requirement exists so cicada never invents a chart's first version |
 | #97 | A derived release still writes a changelog entry. It has no commits, so the body comes from `derived_from` in the notes context — never an empty entry, never a skipped one, and never prose emitted by core |
 | #96 | Releases are created in config order, umbrella last. Deterministic ordering is what makes the forge-call log assertable, and the umbrella's body embeds a manifest describing the releases created before it |
+| M7 | The README's configs are parsed by the real parser in CI. Documentation that is only *checked by reading* rots, and the rot is invisible until an adopter hits it |
 | #105 | GitLab drafting strips before it prefixes, and a merge request is addressed by `iid`, never `id`. The first stacks `Draft: ` forever; the second addresses a different merge request entirely |
 | #58 | The retry policy lives in `forge/http.rs` and is shared. A second copy in a second adapter drifts, and the drifted one is the one nobody reads |
 | #63 | The prerelease counter resets on a change to the base **or** the identifier. With only the base considered, `alpha.3` → `beta` publishes `beta.4` — a counter continuing across a stage it never belonged to — and #85 does not catch it, because `beta.4` sorts above `alpha.3` |
@@ -569,10 +595,10 @@ Four features were removed rather than deferred quietly, and two of them change 
 
 ---
 
-## Next: verify the adapters, then M7–M8
+## Next: verify the adapters, then M8
 
-**Both adapters are written and neither has spoken to a live server.** That is now the single outstanding
-gate, and it covers M4 and M6 together:
+**Both adapters are written and neither has spoken to a live server.** That is the single outstanding gate,
+and it covers M4 and M6 together:
 
 ```
 CICADA_TOKEN=… cicada run        # on a release branch, with something to release
@@ -591,15 +617,16 @@ Likely failure sites, in order of how often adapters get them wrong:
 - **Both** — `create_release` needs the tag on the **remote**, so a `--no-push` Phase B followed by a pushed
   one fails there rather than locally.
 
-Then:
+**Then M8**, which closes the loop the action already assumes:
 
-- **M7** — shipped CI templates (an Actions composite action and a GitLab `include:`) plus the docs,
-  including the CI-trigger footgun: the default `GITHUB_TOKEN` does not trigger workflows on PRs it creates,
-  so on an auto-merging repo a PAT or App token is what makes the loop turn at all (§No review gate).
-  `CI_JOB_TOKEN` has the same problem for MRs. Both templates bake in `fetch-depth: 0` / `GIT_DEPTH: 0` and
-  a concurrency guard, and both call `cicada run` so the phase order cannot be got wrong (#35).
-- **M8** — musl static binaries for x86_64 and aarch64, multi-arch Docker **with `git` in it** (so
-  `scratch` is out, #17), and cicada releasing itself (#21).
+- musl static binaries for `x86_64` and `aarch64`, attached to releases with a `SHA256SUMS` beside them —
+  `action.yml` already downloads and verifies exactly that.
+- multi-arch Docker for `linux/amd64` and `linux/arm64`, **with `git` in the image** (#17), so `scratch` is
+  out and Alpine or Debian-slim is in. `ci/gitlab-ci.yml` already references `ghcr.io/boenan/cicada:v1`.
+- **cicada releasing itself** (#21). `cicada.toml` at the root is already the configuration and the worked
+  example; `.github/workflows/release.yml` already runs it. What is missing is the *artifact* workflow, which
+  is a separate thing triggered by the tag cicada pushes (#70) — cicada never grows a cross-compilation
+  matrix of its own.
 
 ---
 

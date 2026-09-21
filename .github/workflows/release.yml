@@ -1,0 +1,38 @@
+# cicada releasing cicada (#21).
+#
+# Also the worked example the README points at: this is what adopting cicada on
+# GitHub looks like, and it is kept honest by being the one this repository runs.
+name: release
+
+on:
+  push:
+    branches: [main]
+
+# Two overlapping runs race on the force-push. Self-correcting, but the wasted
+# work is avoidable — and with auto-merge enabled the race in staleness layer 1
+# is not theoretical (§No review gate).
+concurrency: cicada-release
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history, or the changelog is silently incomplete. cicada errors
+          # on a shallow clone rather than guessing, but nobody should have to
+          # see that error.
+          fetch-depth: 0
+
+      - uses: ./
+        with:
+          # NOT `secrets.GITHUB_TOKEN`. Workflows do not run on pull requests
+          # the default token creates, so the release PR's checks never start —
+          # see "The CI-trigger footgun" in the README. This is not a
+          # convenience on an auto-merging repo; it is what makes the loop turn.
+          token: ${{ secrets.CICADA_TOKEN || secrets.GITHUB_TOKEN }}
