@@ -166,6 +166,16 @@ pub fn render_plan(style: &Style, plan: &cicada_core::plan::Plan) -> String {
     }
     let n = plan.releases.len();
     s.push_str(&format!("\n  {} release{}\n", n, plural(n)));
+
+    // F8 — say it out loud. A changelog that is silently not written reads as a
+    // bug, and "prereleases never touch CHANGELOG.md" (#62) is exactly the kind
+    // of deliberate omission that looks like one.
+    if plan.releases.iter().any(|r| !r.to.pre.is_empty()) {
+        s.push_str(&format!(
+            "  {}\n",
+            style.dim("prerelease: version files and tags are written, CHANGELOG.md is not")
+        ));
+    }
     s
 }
 

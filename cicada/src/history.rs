@@ -72,7 +72,7 @@ pub fn collect(
 
     for i in 0..config.packages.len() {
         let (name, pkg) = config.packages.get_index(i).expect("index within config");
-        let recorded = versions.package(name).map(|e| e.version.clone());
+        let recorded = versions.package(name).and_then(|e| e.version.clone());
         let anchor = resolve(git, name, &pkg.tag_format, recorded.as_ref(), head)?;
         let commits = read_range(git, config, anchor.as_deref(), head)?;
         let t = Target::Package(PackageId(i));
@@ -84,7 +84,7 @@ pub fn collect(
     // child's (Q10) — it is a fourth line that happens to live in one tree, not a
     // function of the others.
     if let Some(u) = &config.umbrella {
-        let recorded = versions.umbrella.as_ref().map(|e| e.version.clone());
+        let recorded = versions.umbrella.as_ref().and_then(|e| e.version.clone());
         let anchor = resolve(git, &u.name, &u.tag_format, recorded.as_ref(), head)?;
         let commits = read_range(git, config, anchor.as_deref(), head)?;
         history.insert(Target::Umbrella, commits);

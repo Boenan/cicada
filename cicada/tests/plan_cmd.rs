@@ -549,15 +549,29 @@ fn i4_a_config_problem_hard_errors_rather_than_reporting_a_finding() {
 }
 
 #[test]
-fn a_prerelease_branch_refuses_rather_than_reporting_a_stable_version() {
-    // The one deliberate gap in M1. Computing a stable version on a prerelease
-    // line would be a *wrong answer*, not an incomplete one, and a plan that lies
-    // offline defeats the point of it running offline (§Goals 6).
+fn f8_plan_on_a_prerelease_branch_reports_the_rc_version_and_the_skipped_changelog() {
+    // The default `prerelease_branches` pattern picks this up with no config
+    // stanza at all, and `prerelease_identifier` defaults to `rc` (#83).
     let f = shape_1();
     f.git(&["checkout", "-b", "prerelease-v1.5-rc"]);
     f.commit("feat: add login");
 
+    let j = f.json(&[]);
+    let rs = j.releases();
+    assert_eq!(rs[0].to, "0.1.0-rc.1");
+    assert_eq!(rs[0].tag, "v0.1.0-rc.1");
+
+    // F8 — it says the changelog will not be written, because a silently skipped
+    // file write reads as a bug.
     let out = f.plan(&[]);
-    assert_eq!(code(&out), 1);
-    assert!(stderr(&out).contains("not implemented yet"), "{}", stderr(&out));
+    assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
+    assert!(stdout(&out).contains("CHANGELOG.md is not"), "{}", stdout(&out));
 }
+
+#[test]
+fn f6_the_ad_hoc_flag_cuts_a_prerelease_from_an_ordinary_branch() {
+    let f = shape_1();
+    f.commit("feat: add login");
+    assert_eq!(f.json(&["--prerelease", "beta"]).releases()[0].to, "0.1.0-beta.1");
+}
+

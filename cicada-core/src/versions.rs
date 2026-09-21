@@ -34,12 +34,32 @@ pub struct Entry {
     /// The last **stable** release — and therefore the anchor (#60). The presence
     /// of `prerelease` does not change what this field means, which is the whole
     /// reason prereleases cost one extra field rather than a new anchor model.
-    pub version: Version,
+    ///
+    /// **Optional**, because a line whose *first* release is a prerelease has no
+    /// last stable at all. Writing `0.0.0` there would be exactly the sentinel #4
+    /// exists to refuse — a version that never existed, which anchor resolution
+    /// would then try to find a tag for. Absent means absent, and the anchor is
+    /// unset, which is already how "never released" is spelled everywhere else.
+    #[serde(default)]
+    pub version: Option<Version>,
     /// Present only while a prerelease line is open; deleted when the stable
     /// release cuts (#60). Every release computes from `version` regardless, so
     /// notes stay cumulative (#61) — this tracks only which counter is current.
     #[serde(default)]
     pub prerelease: Option<Version>,
+}
+
+impl Entry {
+    /// A stable entry, the ordinary case.
+    pub fn stable(version: Version) -> Self {
+        Entry { version: Some(version), prerelease: None }
+    }
+
+    /// Is this entry meaningful at all? An entry with neither field says nothing,
+    /// and saying nothing is what an *absent* entry is for (#4).
+    pub fn is_empty(&self) -> bool {
+        self.version.is_none() && self.prerelease.is_none()
+    }
 }
 
 /// A versions file that would not parse. Distinct from a *finding*: cicada cannot
@@ -53,7 +73,25 @@ impl VersionsFile {
     /// the binary maps that to [`VersionsFile::default`], because absent and empty
     /// mean the same thing: nothing has been released (#4).
     pub fn from_toml(src: &str) -> Result<Self, ParseError> {
-        toml::from_str(src).map_err(|e| ParseError(e.to_string()))
+        let parsed: Self = toml::from_str(src).map_err(|e| ParseError(e.to_string()))?;
+        // An entry with neither field is not a state — it is a typo that would
+        // otherwise read as "released, at nothing".
+        for (name, e) in &parsed.packages {
+            if e.is_empty() {
+                return Err(ParseError(format!(
+                    "[packages.{name}] has neither `version` nor `prerelease`; remove the entry \
+                     to say the package has never been released (#4)"
+                )));
+            }
+        }
+        if parsed.umbrella.as_ref().is_some_and(Entry::is_empty) {
+            return Err(ParseError(
+                "[umbrella] has neither `version` nor `prerelease`; remove it to say the umbrella \
+                 has never been released (#4)"
+                    .into(),
+            ));
+        }
+        Ok(parsed)
     }
 
     pub fn package(&self, name: &str) -> Option<&Entry> {
@@ -87,7 +125,9 @@ impl VersionsFile {
 }
 
 fn push_entry(s: &mut String, e: &Entry) {
-    s.push_str(&format!("version = \"{}\"\n", e.version));
+    if let Some(v) = &e.version {
+        s.push_str(&format!("version = \"{v}\"\n"));
+    }
     // Written only while a line is open, and deleted when the stable cuts (#60) —
     // so the key's *absence* is meaningful and must not become `prerelease = \"\"`.
     if let Some(p) = &e.prerelease {
@@ -127,8 +167,8 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert_eq!(v.umbrella.as_ref().unwrap().version, Version::new(1, 7, 0));
-        assert_eq!(v.package("api").unwrap().version, Version::new(1, 4, 2));
+        assert_eq!(v.umbrella.as_ref().unwrap().version, Some(Version::new(1, 7, 0)));
+        assert_eq!(v.package("api").unwrap().version, Some(Version::new(1, 4, 2)));
         assert!(v.package("api").unwrap().prerelease.is_none());
         // Absent entry, not a sentinel (#4).
         assert!(v.package("worker").is_none());
@@ -145,7 +185,7 @@ mod tests {
         )
         .unwrap();
         let e = v.package("api").unwrap();
-        assert_eq!(e.version, Version::new(1, 4, 2));
+        assert_eq!(e.version, Some(Version::new(1, 4, 2)));
         assert_eq!(e.prerelease.as_ref().unwrap().to_string(), "1.5.0-rc.2");
     }
 
@@ -226,13 +266,12 @@ mod write_tests {
     #[test]
     fn a_package_name_needing_quotes_gets_them() {
         let mut v = VersionsFile::default();
-        v.packages.insert(
-            "my.pkg".into(),
-            Entry { version: Version::new(1, 0, 0), prerelease: None },
-        );
+        v.packages.insert("my.pkg".into(), Entry::stable(Version::new(1, 0, 0)));
         let text = v.to_toml();
         assert!(text.contains("[packages.\"my.pkg\"]"), "{text}");
-        assert_eq!(VersionsFile::from_toml(&text).unwrap().package("my.pkg").unwrap().version,
-                   Version::new(1, 0, 0));
+        assert_eq!(
+            VersionsFile::from_toml(&text).unwrap().package("my.pkg").unwrap().version,
+            Some(Version::new(1, 0, 0))
+        );
     }
 }

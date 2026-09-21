@@ -182,7 +182,7 @@ pub fn run(git: &impl GitBackend, input: &PhaseBInput<'_>) -> Result<Outcome, Ph
             && let Some((name, tag_format, _)) = target_bits(cfg, input.versions, *t)
             && let Some(v) = parse_tag(&tag_format, tag)
         {
-            let entry = cicada_core::versions::Entry { version: v, prerelease: None };
+            let entry = cicada_core::versions::Entry::stable(v);
             match t {
                 Target::Umbrella => base.umbrella = Some(entry),
                 Target::Package(_) => {
@@ -201,6 +201,12 @@ pub fn run(git: &impl GitBackend, input: &PhaseBInput<'_>) -> Result<Outcome, Ph
         // a stale merge onto a patch-only line is caught by the guard below
         // anyway — by the check that is actually about this situation.
         maintenance: false,
+        // The replan answers "what does this range justify?", and the answer is a
+        // *stable* number whatever kind of release is being reconciled: an rc's
+        // recorded version is compared against the base it decorates, and
+        // decorating the recomputation too would compare a counter against a
+        // counter and mean nothing.
+        prerelease: None,
         branch: String::new(),
     })?;
 
@@ -217,7 +223,9 @@ pub fn run(git: &impl GitBackend, input: &PhaseBInput<'_>) -> Result<Outcome, Ph
             // reconcile. Not an error — this is A7, a virgin repo's Phase B.
             continue;
         };
-        let version = entry.prerelease.clone().unwrap_or_else(|| entry.version.clone());
+        // The prerelease when a line is open, the stable otherwise (#60). An
+        // entry with neither cannot exist — `from_toml` refuses it.
+        let Some(version) = reconcilable_version(&entry) else { continue };
         let tag = render_tag(&tag_format, &version);
 
         let sha = match git.rev_parse(&tag)? {
@@ -243,7 +251,9 @@ pub fn run(git: &impl GitBackend, input: &PhaseBInput<'_>) -> Result<Outcome, Ph
                 // the next `fix:` legitimately makes the recomputation say
                 // `1.5.1` while the versions file still says `1.5.0`. Only now is
                 // the versions file claiming to describe HEAD.
-                monotonic_guard(&name, &entry.version, &highest[t])?;
+                if let Some(stable) = &entry.version {
+                    monotonic_guard(&name, stable, &highest[t])?;
+                }
                 staleness_guard(&name, &version, &replan, *t)?;
 
                 let message = format!("{name} {version}");
@@ -393,7 +403,8 @@ fn previous_stable_tag(
     all_tags: &[String],
 ) -> Result<Option<String>, GitError> {
     let Some((_, tag_format, entry)) = target_bits(cfg, versions, target) else { return Ok(None) };
-    let recorded = entry.version.clone();
+    // No stable yet means nothing to sit below: the whole history is the range.
+    let Some(recorded) = entry.version.clone() else { return Ok(None) };
 
     let mut best: Option<(Version, String)> = None;
     for tag in all_tags {
@@ -410,6 +421,12 @@ fn previous_stable_tag(
         best = Some((v, tag.clone()));
     }
     Ok(best.map(|(_, t)| t))
+}
+
+/// The version Phase B reconciles for an entry: the open prerelease when there is
+/// one, the last stable otherwise (§Prereleases).
+fn reconcilable_version(entry: &cicada_core::versions::Entry) -> Option<Version> {
+    entry.prerelease.clone().or_else(|| entry.version.clone())
 }
 
 /// Name, tag format and versions-file entry for a target, or `None` when it has
@@ -518,7 +535,7 @@ pub fn pending(
         // No entry means never released: nothing to reconcile, and not an error
         // (#4, A7).
         let Some((name, tag_format, entry)) = target_bits(config, versions, t) else { continue };
-        let version = entry.prerelease.clone().unwrap_or_else(|| entry.version.clone());
+        let Some(version) = reconcilable_version(&entry) else { continue };
         let tag = render_tag(&tag_format, &version);
         let state = match git.rev_parse(&tag)? {
             None => TagState::WouldTag,

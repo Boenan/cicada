@@ -57,6 +57,15 @@ fn commits(subjects: &[&str]) -> Vec<ParsedCommit> {
 }
 
 fn make_plan(config: &Config, versions: &VersionsFile, cs: &[ParsedCommit]) -> Plan {
+    make_plan_pre(config, versions, cs, None)
+}
+
+fn make_plan_pre(
+    config: &Config,
+    versions: &VersionsFile,
+    cs: &[ParsedCommit],
+    identifier: Option<&str>,
+) -> Plan {
     let mut history = BTreeMap::new();
     for i in 0..config.packages.len() {
         history.insert(Target::Package(PackageId(i)), cs.to_vec());
@@ -70,6 +79,7 @@ fn make_plan(config: &Config, versions: &VersionsFile, cs: &[ParsedCommit]) -> P
         history: &history,
         maintenance: false,
         branch: "main".into(),
+        prerelease: identifier.map(str::to_string),
     })
     .expect("fixture plans")
 }
@@ -108,7 +118,11 @@ impl Case {
     }
 
     fn run(&self, subjects: &[&str]) -> Rendered {
-        let p = make_plan(&self.config, &self.versions, &commits(subjects));
+        self.run_pre(subjects, None)
+    }
+
+    fn run_pre(&self, subjects: &[&str], identifier: Option<&str>) -> Rendered {
+        let p = make_plan_pre(&self.config, &self.versions, &commits(subjects), identifier);
         render(&RenderInput {
             config: &self.config,
             plan: &p,
@@ -500,4 +514,63 @@ app_version = { track = "app" }
     // And the chart's appVersion followed the app, quoted (#51).
     let chart = &edit(&r, "chart/Chart.yaml").content;
     assert_eq!(*chart, "name: app\nversion: 0.9.1\nappVersion: \"1.4.3\"\n");
+}
+
+// --- F · prereleases at the file level -----------------------------------
+
+#[test]
+fn f1_an_rc_writes_the_version_file_and_leaves_the_changelog_untouched() {
+    // #62 — if every release wrote a cumulative entry the file would accumulate
+    // rc.1, then rc.2 repeating it, then the stable repeating it again. Version
+    // files *are* written, because the rc artifact has to build.
+    let existing = "# Changelog\n\n<!-- cicada:insert -->\n\n## 1.4.2 (2026-01-01)\n\n* old\n";
+    let r = Case::new(SHAPE_1)
+        .source("Cargo.toml", CARGO)
+        .source("CHANGELOG.md", existing)
+        .run_pre(&["feat: add export"], Some("rc"));
+
+    assert_eq!(edit(&r, "Cargo.toml").content, CARGO.replace("1.4.2", "1.5.0-rc.1"));
+    assert!(
+        r.edits.iter().all(|e| e.path != "CHANGELOG.md"),
+        "the changelog must be byte-identical: {:?}",
+        paths(&r)
+    );
+
+    // The versions file records the rc and leaves `version` exactly where it was
+    // — `version` means *last stable release*, and no stable release happened.
+    let v = &edit(&r, ".cicada-versions.toml").content;
+    assert!(v.contains("version = \"1.4.2\""), "{v}");
+    assert!(v.contains("prerelease = \"1.5.0-rc.1\""), "{v}");
+}
+
+#[test]
+fn f5_promotion_writes_one_complete_entry_and_deletes_the_prerelease_key() {
+    // The scenario the whole `version`/`prerelease` split exists to make work.
+    let open = "[packages.app]\nversion = \"1.4.2\"\nprerelease = \"1.5.0-rc.2\"\n";
+    let r = Case::new(SHAPE_1)
+        .versions(open)
+        .source("Cargo.toml", CARGO)
+        .run(&["feat: add export", "fix: handle nil"]);
+
+    let log = &edit(&r, "CHANGELOG.md").content;
+    assert!(log.contains("## 1.5.0 (2026-09-21)"), "{log}");
+    // Everything since the last stable, in one entry, with no rc entries and no
+    // duplication.
+    assert!(log.contains("add export") && log.contains("handle nil"), "{log}");
+    assert!(!log.contains("-rc."), "no rc string anywhere: {log}");
+
+    let v = &edit(&r, ".cicada-versions.toml").content;
+    assert!(v.contains("version = \"1.5.0\""), "{v}");
+    assert!(!v.contains("prerelease"), "the key is deleted, not emptied: {v}");
+}
+
+#[test]
+fn f7_the_notes_are_cumulative_even_though_no_changelog_was_written() {
+    // Reviewers and testers see the content; the file stays linear.
+    let r = Case::new(SHAPE_1)
+        .source("Cargo.toml", CARGO)
+        .run_pre(&["feat: add export", "fix: handle nil"], Some("rc"));
+    let body = r.notes.get(&Target::Package(PackageId(0))).expect("notes for the rc");
+    assert!(body.contains("add export"), "{body}");
+    assert!(body.contains("handle nil"), "{body}");
 }

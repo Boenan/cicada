@@ -193,6 +193,7 @@ adapters cheap instead of a rewrite.
 | 101 | #32's guard inspects the branch **that is about to be overwritten** — the *remote* head branch when cicada will push, not the local one. A fresh CI clone has no local `cicada/main`, so a guard reading `refs/heads/` sees nothing, finds no human commit, and force-pushes over one. cicada fetches the head branch into a private ref before judging, and pushes with `--force-with-lease` against exactly the sha it read |
 | 102 | GitHub drafting is a **GraphQL** operation, not a REST field. `draft: true` works when a pull request is created and nowhere else; `PATCH /pulls/{n}` has no such parameter. Staleness layer 2 drafts a PR that already exists, which is precisely the case REST cannot express — so `set_draft` takes the whole `PullRequest` (for its node id) rather than a number, and #54's title-prefix fallback stays reserved for forges where drafting is genuinely unavailable |
 | 103 | Monotonicity (#76) is checked **directly** in Phase B, not inferred from the staleness guard. J4b claims a downward hand-edit trips that guard "with no extra machinery"; it cannot, because #90 selects `prev` from tags *below* the recorded version — editing `1.4.2` down to `1.0.0` leaves no eligible `prev`, so the recomputation becomes a *first release* and `1.0.0` clears it. Phase B therefore refuses when a **reachable stable tag sits above** the recorded version. Reachability is what keeps parallel lines out of it (G6, G10) |
+| 104 | `version` in `.cicada-versions.toml` is **optional**. A line whose *first* release is a prerelease has no last stable at all, and writing `0.0.0` there would be precisely the sentinel #4 refuses — a version that never existed, which anchor resolution would then go looking for a tag for. Absent means absent, and the anchor is unset. An entry with **neither** `version` nor `prerelease` is a parse error: that is what an absent entry says |
 
 ---
 
@@ -730,8 +731,16 @@ version = "1.7.0"
 version    = "1.4.2"        # last STABLE release — the anchor (#60)
 prerelease = "1.5.0-rc.2"   # present only while a prerelease line is open; deleted when 1.5.0 cuts
 
+[packages.gateway]
+prerelease = "0.1.0-rc.1"   # no stable yet: the line's first release is an rc (#104)
+
 # `chart` absent → never released → first release takes all reachable history
 ```
+
+`version` is **optional** (#104), and `[packages.gateway]` above is why: a line whose first release is a
+prerelease has no last stable to record. `0.0.0` would be the sentinel #4 exists to refuse, and anchor
+resolution would go looking for a `v0.0.0` tag that never existed. An entry carrying **neither** key is a
+parse error — saying nothing is what an *absent* entry is for.
 
 **A version and nothing else** (#1, #2). Written by cicada, committed by the release PR. Its path is fixed —
 beside `cicada.toml` at the repo root — because tooling that reads it should not have to hunt.
@@ -1640,11 +1649,11 @@ Two sequencing principles, both learned from the decisions above:
 | M | Content | Exit criterion |
 |---|---|---|
 | **M0** | Workspace (`cicada-core` pure + `cicada`), config parsing, `GitBackend` + subprocess impl, conventional-commit parser (multi-scope, breaking, footers). ~~Spike: span-preserving YAML splice~~ **done** | `cicada check` lints a range with did-you-mean suggestions. ✅ Spike complete: `spikes/yaml-splice`, 15 cases green |
-| **M1** | Anchor resolution (per-package ranges, tag reachability), scope routing incl. `default_scope`, bump computation (section `bump`, first-release table, `pre_major`, `maintenance` guard), umbrella aggregation, `Plan`. **done** | ✅ `cicada plan --json` correct on a fixture **monorepo and a single-package repo through the same code path**, fully offline. 111 tests green. One gap: a branch matching `prerelease_branches` refuses rather than reporting a stable version |
+| **M1** | Anchor resolution (per-package ranges, tag reachability), scope routing incl. `default_scope`, bump computation (section `bump`, first-release table, `pre_major`, `maintenance` guard), umbrella aggregation, `Plan`. **done** | ✅ `cicada plan --json` correct on a fixture **monorepo and a single-package repo through the same code path**, fully offline |
 | **M2** | Updaters (cargo, helm, generic path + marker, template), minijinja notes template with three contexts + filters + `template print`, changelog marker insert/create, versions-file write, `FileEdit` boundary. **done** | ✅ `release-pr --dry-run` prints exactly the diff it would write; duplicate-output and re-parse checks fire. 198 tests green |
 | **M3** | Git write path: release PR branch reset/commit, committer identity, `release_branches` allowlist, templated `release_pr_branch`, `--no-push` end to end. **done** | ✅ **`release-pr --no-push` produces a real local release commit**, inspectable with `git show`, with the working tree untouched (#100). The #32 staleness refusal and the #80 collision check both fire. 216 tests green |
 | **M4** | `Forge` trait (9 methods) + GitHub adapter, upsert by head branch, auth via `GIT_ASKPASS`, retries/error mapping, **staleness model** (committer guard, draft, comment, close on empty plan). **built, one half unverified** | Protocols asserted against a recording fake; fetch/push/lease against a real bare repo; askpass end to end. 251 tests green. **Not yet verified: real HTTP against github.com** — that needs a token and a repo, and is the remaining gate |
-| **M5** | Phase B: tag reconciliation (reachability + collision), **independent release-object reconciliation**, stale-merge detection, release manifest (disk + embedded), `cicada run` ordering. **done** | ✅ merge → tag → release; re-run is a no-op; a tag with no release object self-heals; a maintenance branch releases independently of `main`. 275 tests green. Verified end to end locally with `--no-push`; the forge half still rests on the fake (see M4) |
+| **M5** | Phase B: tag reconciliation (reachability + collision), **independent release-object reconciliation**, stale-merge detection, release manifest (disk + embedded), `cicada run` ordering. **done**, and **prereleases with it** (#59–#64, #85, #93) | ✅ merge → tag → release; re-run is a no-op; a tag with no release object self-heals; a maintenance branch releases independently of `main`. 275 tests green. Verified end to end locally with `--no-push`; the forge half still rests on the fake (see M4) |
 | **M6** | GitLab adapter (REST v4, draft-as-title-prefix, self-hosted `api_url`) | Same flow green on GitLab |
 | **M7** | Shipped CI templates (Actions composite action, GitLab `include:`), docs incl. the CI-trigger footgun and a worked `cicada.toml` per repo shape | Third party can adopt from the README alone |
 | **M8** | musl static binaries (x86_64, aarch64), multi-arch Docker with `git`, self-release | cicada v0.1.0 released by cicada |

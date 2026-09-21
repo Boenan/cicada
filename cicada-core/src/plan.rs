@@ -32,6 +32,37 @@ pub fn render_tag(format: &str, version: &Version) -> String {
     format.replace("{version}", &version.to_string())
 }
 
+/// Split a prerelease version into `(base, identifier, counter)`.
+///
+/// `1.5.0-rc.2` → `(1.5.0, "rc", 2)`. Identifiers are free strings with dotted
+/// numbering (#64), so the split is at the **last** dot whose tail is numeric —
+/// `1.5.0-alpha.beta.3` is `("alpha.beta", 3)`, which is the reading that keeps a
+/// dotted identifier from silently becoming a counter.
+///
+/// A prerelease with no numeric tail (`1.5.0-rc`) reports counter `0`, so the
+/// next one computed is `rc.1` and sorts above it.
+pub fn split_prerelease(v: &Version) -> Option<(Version, String, u64)> {
+    if v.pre.is_empty() {
+        return None;
+    }
+    let base = Version::new(v.major, v.minor, v.patch);
+    let pre = v.pre.as_str();
+    match pre.rsplit_once('.') {
+        Some((id, n)) if !id.is_empty() => match n.parse::<u64>() {
+            Ok(n) => Some((base, id.to_string(), n)),
+            Err(_) => Some((base, pre.to_string(), 0)),
+        },
+        _ => Some((base, pre.to_string(), 0)),
+    }
+}
+
+/// Attach `-{identifier}.{counter}` to a base version.
+fn with_prerelease(base: &Version, identifier: &str, counter: u64) -> Option<Version> {
+    let mut v = base.clone();
+    v.pre = semver::Prerelease::new(&format!("{identifier}.{counter}")).ok()?;
+    Some(v)
+}
+
 /// Read a version back out of a tag, given the format that produced it.
 ///
 /// The inverse of [`render_tag`], and the only way Phase B can ask "which
@@ -149,6 +180,18 @@ pub enum PlanError {
     /// The maintenance guard (#28). A **guard, not a clamp**: a computed bump
     /// above patch is refused, never silently reduced.
     MaintenanceGuard { branch: String, offenders: Vec<Offender> },
+
+    /// #85 — a computed prerelease that does not sort **strictly above** the one
+    /// already open.
+    ///
+    /// This is the **only** guarantee a maturity ladder gets (#93, #94). cicada
+    /// draws no distinction between identifiers whatsoever: `alpha`, `beta` and
+    /// `rc` anchor the same way, compute the same base, run the same counter and
+    /// produce the same release object. The one thing that differs is the string
+    /// in the version and the ordering it implies — so the rule is monotonicity
+    /// and nothing else. It permits `alpha` → `beta` → `rc` and refuses
+    /// `rc` → `beta`, without cicada knowing what any of those words mean.
+    PrereleaseWentBackwards { package: String, open: Version, computed: Version },
 }
 
 impl std::fmt::Display for PlanError {
@@ -163,6 +206,22 @@ impl std::fmt::Display for PlanError {
                     }
                 }
                 Ok(())
+            }
+            PlanError::PrereleaseWentBackwards { package, open, computed } => {
+                write!(
+                    f,
+                    "'{package}' has {open} open, and this run computes {computed}, which sorts \
+                     below it\n\
+                     \n\
+                     A prerelease line may only move forwards. Semver's ordering is the contract \
+                     consumers\nresolve against, so cicada refuses the edits that violate it \
+                     rather than redefining them —\nwhich is why there is no declared ladder of \
+                     stages to appeal to (#94).\n\
+                     \n\
+                     Pick an identifier that sorts above `{}`, or close the open line by releasing \
+                     it stable.",
+                    open.pre.as_str()
+                )
             }
             PlanError::MaintenanceGuard { branch, offenders } => {
                 writeln!(
@@ -209,6 +268,13 @@ pub struct PlanInput<'a> {
     pub maintenance: bool,
     /// The branch being planned, for the guard's error text.
     pub branch: String,
+    /// The identifier this run's prereleases carry, when it cuts them (#59).
+    ///
+    /// **Branch-level, never per-package.** Per-package prereleases make the
+    /// umbrella incoherent — semver aggregation has no meaning when some children
+    /// are on rc and others are not — so every release in a run is decorated or
+    /// none is.
+    pub prerelease: Option<String>,
 }
 
 pub fn plan(input: &PlanInput<'_>) -> Result<Plan, PlanError> {
@@ -315,7 +381,7 @@ pub fn plan(input: &PlanInput<'_>) -> Result<Plan, PlanError> {
         }
         let (name, pkg) = cfg.packages.get_index(i).expect("index within config");
         let entry = input.versions.package(name);
-        let from = entry.map(|e| e.version.clone());
+        let from = entry.and_then(|e| e.version.clone());
         let to = match &from {
             None => initial(pkg.initial_version.as_deref(), bump),
             Some(f) => next_version(f, bump, pkg.pre_major.unwrap_or(PreMajor::Minor)),
@@ -357,7 +423,7 @@ pub fn plan(input: &PlanInput<'_>) -> Result<Plan, PlanError> {
     if let Some(u) = &cfg.umbrella
         && umbrella_bump > Bump::None
     {
-        let from = input.versions.umbrella.as_ref().map(|e| e.version.clone());
+        let from = input.versions.umbrella.as_ref().and_then(|e| e.version.clone());
         let to = match &from {
             // The umbrella carries no `initial_version` and no `pre_major`: it is
             // a label on the set, so it takes the defaults rather than growing two
@@ -390,11 +456,88 @@ pub fn plan(input: &PlanInput<'_>) -> Result<Plan, PlanError> {
     // above, which is the same argument as `PackageId` being an ordinal (#31).
     releases.sort_by_key(|r| r.target);
 
+    // Decoration is a **separate pass over the finished stable plan**, and that
+    // is the whole trick (#61): the anchor, the range and the computed base are
+    // untouched, so every release — rc.1, rc.2 and the final stable — computes
+    // from the same last-stable anchor and the notes are cumulative by
+    // construction. Prereleases cost one extra field, not a second model.
+    if let Some(identifier) = &input.prerelease {
+        for r in &mut releases {
+            decorate(cfg, input.versions, r, identifier)?;
+        }
+    }
+
     if input.maintenance {
         guard_maintenance(cfg, &releases, &input.branch)?;
     }
 
     Ok(Plan { releases })
+}
+
+/// Turn a computed stable release into the next prerelease on its line.
+///
+/// **The counter resets on a change to the base *or* the identifier** (#63), and
+/// both are recomputed from this run's inputs with nothing stored. The identifier
+/// axis is the one that is easy to miss: with only the base considered, an
+/// `alpha.3` line moving to `beta` computes an unchanged base, increments, and
+/// publishes `1.5.0-beta.4` — a counter continuing across a stage it never
+/// belonged to. It even passes #85, because `beta.4` sorts above `alpha.3`, so
+/// nothing catches it (F10d).
+fn decorate(
+    cfg: &Config,
+    versions: &VersionsFile,
+    r: &mut Release,
+    identifier: &str,
+) -> Result<(), PlanError> {
+    let open = match r.target {
+        Target::Umbrella => versions.umbrella.as_ref().and_then(|e| e.prerelease.clone()),
+        Target::Package(id) => cfg
+            .package_name(id)
+            .and_then(|n| versions.package(n))
+            .and_then(|e| e.prerelease.clone()),
+    };
+
+    let counter = match open.as_ref().and_then(split_prerelease) {
+        Some((base, id, n)) if base == r.to && id == identifier => n + 1,
+        _ => 1,
+    };
+
+    let computed = with_prerelease(&r.to, identifier, counter).ok_or_else(|| {
+        PlanError::PrereleaseWentBackwards {
+            package: r.name.clone(),
+            open: r.to.clone(),
+            computed: r.to.clone(),
+        }
+    })?;
+
+    // #85 — strictly greater than the open one, or refuse.
+    if let Some(open) = &open
+        && computed <= *open
+    {
+        return Err(PlanError::PrereleaseWentBackwards {
+            package: r.name.clone(),
+            open: open.clone(),
+            computed,
+        });
+    }
+
+    r.tag = render_tag(tag_format_for(cfg, r.target), &computed);
+    r.to = computed;
+    Ok(())
+}
+
+/// The `tag_format` a target declares.
+pub fn tag_format_for(cfg: &Config, target: Target) -> &str {
+    match target {
+        Target::Umbrella => {
+            cfg.umbrella.as_ref().map(|u| u.tag_format.as_str()).unwrap_or("{version}")
+        }
+        Target::Package(id) => cfg
+            .packages
+            .get_index(id.0)
+            .map(|(_, p)| p.tag_format.as_str())
+            .unwrap_or("{version}"),
+    }
 }
 
 /// Every declared target, in release order (#96).

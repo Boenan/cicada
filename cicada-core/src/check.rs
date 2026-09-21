@@ -399,6 +399,52 @@ pub fn validate_config(config: &Config) -> Vec<Finding> {
 /// `release_branches = ["main", "release/*"]`, a head template of
 /// `release/{branch}` renders `release/main` — which matches `release/*`, so
 /// cicada's own force-push re-triggers cicada on the branch it just wrote.
+/// #83 — a branch whose name says one stage while `prerelease_identifier` says
+/// another.
+///
+/// A wrong **maintenance** classification is loud: exit `4`, naming the commits
+/// that computed above patch, and nothing ships. A wrong **prerelease**
+/// classification is quieter — a branch named `prerelease-beta` matching the
+/// default pattern cuts `1.5.0-rc.1`, and the only signal is the identifier in a
+/// version string. It is visible in the release PR before any tag exists, but
+/// nobody reads a version string as a warning.
+///
+/// So `check` closes the gap directly. **Only against a defaulted pattern**: a
+/// repo that wrote its own `prerelease_branches` has said what it means, and
+/// second-guessing that would be cicada having an opinion about branch names.
+///
+/// The word list is a lint heuristic, not semantics — cicada still parses no
+/// meaning out of a branch name (#94). It only notices that the developer wrote
+/// one thing and is about to get another.
+pub fn validate_prerelease_identifier(
+    config: &Config,
+    branch: &str,
+    patterns_are_default: bool,
+) -> Option<Finding> {
+    const STAGES: &[&str] = &["alpha", "beta", "rc", "preview", "next"];
+
+    if !patterns_are_default {
+        return None;
+    }
+    if !crate::branch::matches_any(&config.settings.prerelease_branches, branch).ok()? {
+        return None;
+    }
+    let trailing = branch.rsplit(['-', '/']).next()?;
+    if !STAGES.contains(&trailing) || trailing == config.settings.prerelease_identifier {
+        return None;
+    }
+    Some(
+        Finding::problem(
+            "settings.prerelease_identifier",
+            format!(
+                "'{branch}' ends in `{trailing}`, but prereleases here would be called `{}`",
+                config.settings.prerelease_identifier
+            ),
+        )
+        .with_help(format!("set `prerelease_identifier = \"{trailing}\"`, or rename the branch")),
+    )
+}
+
 pub fn validate_release_pr_branch(config: &Config, branch: &str) -> Option<Finding> {
     let head = crate::branch::render_pr_branch(&config.settings.release_pr_branch, branch);
     let matches = crate::branch::matches_any(&config.settings.release_branches, &head).ok()?;

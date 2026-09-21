@@ -219,6 +219,15 @@ pub fn render(input: &RenderInput<'_>) -> Result<Rendered, EditError> {
     // --- changelogs ----------------------------------------------------------
     let header = tmpl("changelog-header", template::CHANGELOG_HEADER);
     for r in &input.plan.releases {
+        // **Prereleases never touch `CHANGELOG.md`** (#62). If every release wrote
+        // a cumulative entry the file would accumulate rc.1, then rc.2 repeating
+        // it, then the stable repeating it again. Instead the changelog holds only
+        // stable releases — clean and linear — while each rc's *release notes* are
+        // cumulative since the last stable, which is exactly what a tester wants.
+        // Version files are still written, because the rc artifact has to build.
+        if !r.to.pre.is_empty() {
+            continue;
+        }
         let Some(path) = changelog_path(cfg, r.target) else { continue };
 
         let entry = if r.target == Target::Umbrella {
@@ -351,12 +360,8 @@ fn next_versions(input: &RenderInput<'_>) -> VersionsFile {
         let released = input.plan.get(Target::Package(PackageId(i)));
         let existing = input.versions.package(name);
         match (released, existing) {
-            (Some(r), _) => {
-                out.packages.insert(
-                    name.clone(),
-                    // The stable line moved, so any open prerelease is closed (#60).
-                    Entry { version: r.to.clone(), prerelease: None },
-                );
+            (Some(r), existing) => {
+                out.packages.insert(name.clone(), next_entry(r, existing));
             }
             (None, Some(e)) => {
                 out.packages.insert(name.clone(), e.clone());
@@ -368,10 +373,29 @@ fn next_versions(input: &RenderInput<'_>) -> VersionsFile {
     }
 
     out.umbrella = match (input.plan.get(Target::Umbrella), &input.versions.umbrella) {
-        (Some(r), _) => Some(Entry { version: r.to.clone(), prerelease: None }),
+        (Some(r), existing) => Some(next_entry(r, existing.as_ref())),
         (None, Some(e)) => Some(e.clone()),
         (None, None) => None,
     };
 
     out
+}
+
+/// The versions-file entry a release produces.
+///
+/// A **stable** release moves `version` and **deletes** `prerelease`, which is
+/// what closes an open line (#60, F5). A **prerelease** does the opposite: it
+/// records itself under `prerelease` and leaves `version` exactly where it was,
+/// because `version` means *last stable release* and no stable release happened
+/// (F1). That split is the entire mechanism — it is why anchor semantics are
+/// untouched and why the stable changelog comes out complete.
+fn next_entry(r: &Release, existing: Option<&Entry>) -> Entry {
+    if r.to.pre.is_empty() {
+        Entry::stable(r.to.clone())
+    } else {
+        Entry {
+            version: existing.and_then(|e| e.version.clone()),
+            prerelease: Some(r.to.clone()),
+        }
+    }
 }

@@ -9,7 +9,7 @@ next* and *what is easy to get wrong*.
 
 | | |
 |---|---|
-| **Design** | Complete. `docs/design.md`, 103 numbered decisions, every section walked and argued through. **No open questions** |
+| **Design** | Complete. `docs/design.md`, 104 numbered decisions, every section walked and argued through. **No open questions** |
 | **Behavioural coverage** | `docs/scenarios/single-service.md` (~140 scenarios, groups A–N) and `docs/scenarios/monorepo.md` (groups O–Y, only what needs N > 1), in five-surface form, doubling as the acceptance suite. Four HTML walkthroughs under `docs/scenarios/single-service/` |
 | **Deferred scope** | `docs/future-work.md`, 16 items, each with why it was deferred and what would trigger it |
 | **M0 spike** | **Done and confirmed.** `spikes/yaml-splice`, 15 tests green |
@@ -378,6 +378,45 @@ branch gate had.
 
 ---
 
+## Prereleases: the last gap is closed
+
+`cicada plan` on a prerelease branch used to refuse. It now cuts them, and **nothing in the design is
+refused by the code any more.**
+
+The whole mechanism is one extra field (#60) and one extra pass. Decoration happens *after* the stable plan
+is finished, so the anchor, the range and the computed base are untouched — which is what makes every
+release, rc.1 through the final stable, compute from the same last-stable anchor and the stable changelog
+come out complete (#61).
+
+Walked end to end on a real repo:
+
+```
+prerelease_identifier = "alpha"   →  1.5.0-alpha.1  ·  1.5.0-alpha.2
+edited to "beta", committed       →  1.5.0-beta.1      counter resets (#63)
+rc.2 open, asked for beta         →  exit 4            sorts below it (#85)
+```
+
+| Piece | Location |
+|---|---|
+| `split_prerelease`, the decoration pass, #85 | `cicada-core/src/plan.rs` |
+| Skipped changelog (#62), versions-file shape | `cicada-core/src/render.rs` |
+| Optional `version`, the neither-field refusal | `cicada-core/src/versions.rs` |
+| The #83 identifier lint | `cicada-core/src/check.rs` |
+| `--prerelease`, branch classification | `cicada/src/main.rs` |
+
+**Two things the build settled:**
+
+1. **`version` had to become optional** — now #104. A line whose *first* release is an rc has no last
+   stable, and `0.0.0` would be the sentinel #4 refuses: anchor resolution would go looking for a `v0.0.0`
+   tag that never existed. An entry with neither key is now a parse error, because saying nothing is what an
+   absent entry is for.
+2. **Phase B's replan must not be decorated.** It answers "what does this range justify?", and the answer is
+   a *stable* number whatever kind of release is being reconciled — an rc's recorded version is compared
+   against the base it decorates, and decorating the recomputation too would compare a counter against a
+   counter and mean nothing.
+
+---
+
 ## Constraints that are easy to violate
 
 These are cheap to honour from the start and expensive to retrofit:
@@ -402,6 +441,9 @@ These are cheap to honour from the start and expensive to retrofit:
 | #88 | `initial_version` is required on a package with a `helm` updater, and `Chart.yaml` is still never read back (#75). The requirement exists so cicada never invents a chart's first version |
 | #97 | A derived release still writes a changelog entry. It has no commits, so the body comes from `derived_from` in the notes context — never an empty entry, never a skipped one, and never prose emitted by core |
 | #96 | Releases are created in config order, umbrella last. Deterministic ordering is what makes the forge-call log assertable, and the umbrella's body embeds a manifest describing the releases created before it |
+| #63 | The prerelease counter resets on a change to the base **or** the identifier. With only the base considered, `alpha.3` → `beta` publishes `beta.4` — a counter continuing across a stage it never belonged to — and #85 does not catch it, because `beta.4` sorts above `alpha.3` |
+| #61 | Prerelease decoration is a **separate pass over the finished stable plan**. Anchor, range and base stay untouched, which is the only reason the notes are cumulative and the stable changelog comes out complete |
+| #104 | `version` in the versions file is optional, and `0.0.0` is never written in its place. An entry with neither key is a parse error, not an empty state |
 | #103 | Monotonicity is checked **directly**, not inferred from the staleness guard. The inference does not work — `prev` is chosen from tags *below* the record, so a downward edit leaves no `prev` and recomputes as a first release |
 | #78 | Both Phase B guards run **only** when a tag is about to be created. Unconditionally they fire on every ordinary push after a release, because the versions file only claims to describe HEAD at that one moment |
 | #35 | `cicada run` is Phase B **then** Phase A. Phase A's anchor resolves *because* Phase B just created the tag; the reverse order re-releases the just-merged work every cycle, silently |
@@ -522,10 +564,8 @@ Then:
   is what makes the loop turn at all (§No review gate).
 - **M8** — musl binaries, multi-arch Docker with `git` in it, and cicada releasing itself (#21).
 
-**And the prerelease gap is still open.** It is now the only thing in the design that the code refuses
-rather than implements: `prepare_context` bails on a branch matching `prerelease_branches`. Everything it
-needs is specified (#59–#64, #85, #90, #93) and Phase B already reconciles a `prerelease` field when one is
-present — the counter rule and the monotonicity check are what remain.
+**Nothing in the design is refused by the code any more.** The prerelease gap that stood from M1 through M5
+is closed, so what remains is M6–M8 and M4's verification.
 
 ---
 

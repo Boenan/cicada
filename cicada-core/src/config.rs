@@ -276,7 +276,7 @@ pub enum TrackedBump {
 fn default_maintenance_branches() -> Vec<String> {
     vec!["maintenance/**".into(), "maintenance-*".into()]
 }
-fn default_prerelease_branches() -> Vec<String> {
+pub fn default_prerelease_branches() -> Vec<String> {
     vec!["prerelease/**".into(), "prerelease-*".into()]
 }
 fn default_prerelease_identifier() -> String {

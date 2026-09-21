@@ -199,7 +199,7 @@ pub fn notes_context(
     // and a compare URL built from `0.0.0` would 404 (#89).
     let compare_url = match (&r.from, &links.compare) {
         (Some(from), Some(_)) => {
-            let from_tag = crate::plan::render_tag(tag_format(config, r), from);
+            let from_tag = crate::plan::render_tag(crate::plan::tag_format_for(config, r.target), from);
             links.compare_url(&from_tag, &r.tag)
         }
         _ => None,
@@ -233,20 +233,5 @@ pub fn file_context(r: &Release, date: &str, links: &LinkStyle) -> FileContext {
         date: date.to_string(),
         bump: r.bump.as_str().to_string(),
         commits: r.commits.iter().map(|c| commit_context(c, links)).collect(),
-    }
-}
-
-/// The `tag_format` a release's target declares — needed to spell the *previous*
-/// tag for a compare URL.
-fn tag_format<'a>(config: &'a Config, r: &Release) -> &'a str {
-    match r.target {
-        crate::config::Target::Umbrella => {
-            config.umbrella.as_ref().map(|u| u.tag_format.as_str()).unwrap_or("{version}")
-        }
-        crate::config::Target::Package(id) => config
-            .packages
-            .get_index(id.0)
-            .map(|(_, p)| p.tag_format.as_str())
-            .unwrap_or("{version}"),
     }
 }

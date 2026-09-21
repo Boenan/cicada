@@ -45,6 +45,18 @@ struct Cli {
     #[arg(long, global = true, value_name = "YYYY-MM-DD")]
     date: Option<jiff::civil::Date>,
 
+    /// Cut prereleases with this identifier, e.g. `rc` or `beta`.
+    ///
+    /// The ad-hoc form (F6). The truthful form is `prerelease_branches` plus
+    /// `prerelease_identifier` in config, because that lives on the branch — so
+    /// `cicada plan` run on a laptop with no arguments reports the stage the line
+    /// is actually in. A stage that lives only in a CI argument makes offline
+    /// planning lie, and offline truthfulness is a stated goal (§Goals 6).
+    ///
+    /// Wins where both apply.
+    #[arg(long, global = true, value_name = "ID")]
+    prerelease: Option<String>,
+
     /// Forge API token. Also read from `CICADA_TOKEN`.
     ///
     /// Never persisted, never written to `.git/config`, and never placed in
@@ -329,10 +341,17 @@ fn gather_config_findings(
 ) -> Vec<Finding> {
     let mut findings = validate_config(cfg);
     findings.extend(config::validate_on_disk(cfg, repo.root()));
-    if let Some(b) = branch
-        && let Some(f) = validate_release_pr_branch(cfg, b)
-    {
-        findings.push(f);
+    if let Some(b) = branch {
+        if let Some(f) = validate_release_pr_branch(cfg, b) {
+            findings.push(f);
+        }
+        let defaulted = cfg.settings.prerelease_branches
+            == cicada_core::config::default_prerelease_branches();
+        if let Some(f) =
+            cicada_core::check::validate_prerelease_identifier(cfg, b, defaulted)
+        {
+            findings.push(f);
+        }
     }
     findings
 }
@@ -350,6 +369,8 @@ struct Context {
     on_release_branch: bool,
     maintenance: bool,
     versions: versions::Loaded,
+    /// The identifier this run's prereleases carry, when it cuts them (#59).
+    prerelease: Option<String>,
 }
 
 /// A context plus the plan. **Phase B deliberately does not have one**: anchor
@@ -392,18 +413,20 @@ fn prepare_context(cli: &Cli) -> anyhow::Result<Context> {
     let maintenance =
         cicada_core::branch::matches_any(&cfg.settings.maintenance_branches, &branch_name)?;
 
-    // The one deliberate gap left from M1. A prerelease branch would compute a
-    // *stable* version, which is not a missing feature but a wrong answer — and a
-    // plan that lies offline defeats the point of it running offline (§Goals 6).
-    // Refusing is loud; computing would be quiet. Deleting this block is what
-    // lands prerelease support.
-    if cicada_core::branch::matches_any(&cfg.settings.prerelease_branches, &branch_name)? {
-        anyhow::bail!(
-            "'{branch_name}' matches `prerelease_branches`, and prerelease support is not \
-             implemented yet\ncicada would otherwise compute a stable version here, which would be \
-             wrong rather than incomplete"
-        );
-    }
+    // Does this run cut prereleases, and under what name (#59)? The flag is the
+    // ad-hoc form and wins where both apply; the branch pattern is the form that
+    // lives on the branch, so offline planning tells the truth.
+    let prerelease = match &cli.prerelease {
+        Some(id) => Some(id.clone()),
+        None if cicada_core::branch::matches_any(
+            &cfg.settings.prerelease_branches,
+            &branch_name,
+        )? =>
+        {
+            Some(cfg.settings.prerelease_identifier.clone())
+        }
+        None => None,
+    };
 
     let versions = versions::load(&loaded.path)?;
     tracing::debug!(
@@ -412,7 +435,15 @@ fn prepare_context(cli: &Cli) -> anyhow::Result<Context> {
         "loaded versions file"
     );
 
-    Ok(Context { repo, loaded, branch: branch_name, on_release_branch, maintenance, versions })
+    Ok(Context {
+        repo,
+        loaded,
+        branch: branch_name,
+        on_release_branch,
+        maintenance,
+        versions,
+        prerelease,
+    })
 }
 
 fn prepare_run(cli: &Cli) -> anyhow::Result<Prep<Prepared>> {
@@ -430,12 +461,17 @@ fn prepare_run(cli: &Cli) -> anyhow::Result<Prep<Prepared>> {
         history: &collected.history,
         maintenance: ctx.maintenance,
         branch: ctx.branch.clone(),
+        prerelease: ctx.prerelease.clone(),
     };
     let plan = match cicada_core::plan::plan(&input) {
         Ok(p) => p,
         // "cicada declined to act" is exit `4`, distinct from "cicada broke" (#68)
         // — a pipeline may well want to handle them differently.
-        Err(e @ PlanError::MaintenanceGuard { .. }) => {
+        // Both are refusals, not breakage (#68): cicada declined to act because
+        // acting would publish something that sorts wrong.
+        Err(
+            e @ (PlanError::MaintenanceGuard { .. } | PlanError::PrereleaseWentBackwards { .. }),
+        ) => {
             eprintln!("error: {e}");
             return Ok(Prep::Exit(exit::REFUSED));
         }

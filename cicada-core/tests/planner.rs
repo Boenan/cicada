@@ -140,6 +140,7 @@ fn run_on(
         history: &history,
         maintenance,
         branch: branch.to_string(),
+        prerelease: None,
     })
 }
 
@@ -537,6 +538,7 @@ fn p2_the_range_decides_what_is_read_the_scope_decides_what_is_attributed() {
         history: &history,
         maintenance: false,
         branch: "main".into(),
+        prerelease: None,
     })
     .unwrap();
 
