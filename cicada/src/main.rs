@@ -442,11 +442,34 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
     let cfg = &p.loaded.config;
     let style = Style::detect();
 
-    // 0. The gate (#26). Unlike `plan`, this command writes — so a branch outside
-    //    `release_branches` exits 0 quietly rather than being asked to explain
-    //    itself (H1).
+    // 0. The gate (#26). This command writes, so a branch outside
+    //    `release_branches` does nothing and exits `0` — a push to a feature
+    //    branch is not a failure, and a CI job must not go red for it.
+    //
+    //    But *silently* doing nothing is indistinguishable from a broken tool,
+    //    and that is what a human running this by hand hits first. The note goes
+    //    to **stderr**: H1's assertion is that stdout stays empty (so `--json`
+    //    consumers and pipelines are unaffected), not that cicada refuses to
+    //    explain itself.
     if !p.on_release_branch {
         tracing::info!(branch = %p.branch, "not a release branch; nothing to do");
+        if !cli.quiet {
+            eprintln!(
+                "cicada: nothing to do — '{}' matches no `release_branches` pattern ({})\n\
+                 \n\
+                 cicada only writes on branches you have listed, so this is a no-op rather than\n\
+                 an error. To rehearse a release from here, either run `cicada plan`, which is\n\
+                 not gated, or add this branch to `release_branches` in {}.",
+                p.branch,
+                cfg.settings
+                    .release_branches
+                    .iter()
+                    .map(|b| format!("`{b}`"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                p.loaded.path.display(),
+            );
+        }
         return Ok(exit::OK);
     }
 

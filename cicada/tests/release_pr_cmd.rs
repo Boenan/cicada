@@ -216,9 +216,14 @@ fn a5_an_empty_plan_writes_nothing_and_succeeds() {
 }
 
 #[test]
-fn h1_a_branch_outside_the_gate_exits_zero_silently() {
-    // Unlike `plan`, this command writes — so the gate applies, and a non-matching
-    // branch is not an error, a warning, or output (#26).
+fn h1_a_branch_outside_the_gate_exits_zero_and_says_why() {
+    // The gate applies to every command that writes: a push to a feature branch
+    // is not a failure, and a CI job must not go red for it (#26).
+    //
+    // But it must not be *silent*. Doing nothing without a word is
+    // indistinguishable from a broken tool, and it is the first thing a human
+    // running this by hand hits. The note goes to stderr, so H1's real assertion
+    // — stdout stays empty, `--json` and pipelines unaffected — still holds.
     let f = Fixture::new("gate", SHAPE_1);
     f.write("Cargo.toml", CARGO);
     f.git(&["add", "-A"]);
@@ -226,9 +231,41 @@ fn h1_a_branch_outside_the_gate_exits_zero_silently() {
     f.git(&["checkout", "-b", "feature/foo"]);
     f.commit("feat: add export");
 
-    let out = f.dry_run();
-    assert_eq!(code(&out), 0);
-    assert_eq!(stdout(&out), "", "nothing on stdout except at -v");
+    for args in [
+        vec!["release-pr", "--dry-run"],
+        vec!["release-pr", "--no-push"],
+        // The full form too: the gate is checked before the mode is.
+        vec!["release-pr"],
+    ] {
+        let out = f.cicada(&args);
+        assert_eq!(code(&out), 0, "{args:?}");
+        assert_eq!(stdout(&out), "", "nothing on stdout: {args:?}");
+
+        let e = stderr(&out);
+        assert!(e.contains("feature/foo"), "it names the branch: {e}");
+        assert!(e.contains("release_branches"), "and the setting: {e}");
+        assert!(e.contains("cicada plan"), "and the way to rehearse anyway: {e}");
+        // Nothing was written on the way to saying so.
+        assert!(f.branch_tip("cicada/feature/foo").is_none());
+    }
+}
+
+#[test]
+fn quiet_suppresses_the_gate_note_and_v_still_logs_it() {
+    let f = Fixture::new("gate-quiet", SHAPE_1);
+    f.write("Cargo.toml", CARGO);
+    f.git(&["add", "-A"]);
+    f.git(&["commit", "-m", "chore: manifest"]);
+    f.git(&["checkout", "-b", "feature/foo"]);
+    f.commit("feat: add export");
+
+    let quiet = f.cicada(&["release-pr", "--no-push", "--quiet"]);
+    assert_eq!(code(&quiet), 0);
+    assert_eq!(stdout(&quiet), "");
+    assert_eq!(stderr(&quiet), "", "--quiet means quiet");
+
+    let verbose = f.cicada(&["release-pr", "--no-push", "-v"]);
+    assert!(stderr(&verbose).contains("not a release branch"), "{}", stderr(&verbose));
 }
 
 // --- #24 · the workspace-inheritance redirect ---------------------------
