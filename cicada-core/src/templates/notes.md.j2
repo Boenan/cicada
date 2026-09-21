@@ -1,0 +1,25 @@
+{%- if breaking %}
+### ⚠ BREAKING CHANGES
+
+{% for c in breaking -%}
+* {% if c.scope %}**{{ c.scope }}:** {% endif %}{{ c.description }}{% if c.url %} ([{{ c.short_sha }}]({{ c.url }})){% endif %}
+{% if c.breaking_note %}  {{ c.breaking_note }}
+{% endif %}
+{%- endfor %}
+{% endif -%}
+
+{%- for section in sections %}
+### {{ section.title }}
+
+{% for c in section.commits -%}
+* {% if c.scope %}**{{ c.scope }}:** {% endif %}{{ c.description }}{% if c.url %} ([{{ c.short_sha }}]({{ c.url }})){% endif %}
+{% endfor %}
+{%- endfor -%}
+
+{%- if derived_from and not commits %}
+_Released to track {{ derived_from.package }} {{ derived_from.version }}._
+{% endif -%}
+
+{%- if compare_url %}
+[Compare with {{ previous_version }}]({{ compare_url }})
+{% endif -%}

@@ -272,16 +272,30 @@ pub fn validate_config(config: &Config) -> Vec<Finding> {
     }
 
     // Updater coherence, and the two cross-references a package can get wrong.
-    let mut outputs: Vec<(&str, &str)> = Vec::new();
+    let mut outputs: Vec<(&str, &str, bool)> = Vec::new();
     for (name, pkg) in &config.packages {
         let mut has_helm = false;
         for (i, u) in pkg.updaters.iter().enumerate() {
             use crate::config::UpdaterKind::*;
             let key = format!("packages.{name}.updaters[{i}]");
             match u.kind {
-                Cargo | Helm | Generic => {
+                Cargo | Helm => {
                     if u.path.is_none() {
                         out.push(Finding::problem(&key, "`path` is required for this updater kind"));
+                    }
+                }
+                Generic => {
+                    if u.path.is_none() {
+                        out.push(Finding::problem(&key, "`path` is required for this updater kind"));
+                    }
+                    // Without an `edit` a generic updater names a file and no value
+                    // in it — a silent no-op rather than an error.
+                    if u.edit.is_none() {
+                        out.push(
+                            Finding::problem(&key, "a `generic` updater needs an `edit`").with_help(
+                                "one of `edit = { yaml = \"image.tag\" }`, `{ toml = … }`, `{ json = … }`                                  or `{ marker = \"x-cicada-version\" }`",
+                            ),
+                        );
                     }
                 }
                 Template => {
@@ -310,16 +324,31 @@ pub fn validate_config(config: &Config) -> Vec<Finding> {
                     out.push(f);
                 }
             }
-            // Two updaters writing one output path is a silent, config-order-
-            // dependent bug, so it is a hard error (#44).
-            if let Some(o) = &u.output {
-                if let Some((other, _)) = outputs.iter().find(|(_, p)| p == o) {
-                    out.push(Finding::problem(
-                        format!("{key}.output"),
-                        format!("duplicate output path `{o}` — also written by '{other}'"),
-                    ));
+            // Which file this updater writes, and whether it writes the *whole*
+            // file (#44). Two surgical edits may share a file — one `values.yaml`
+            // holding `image.tag` and `labels.version` is ordinary — and they fold
+            // in config order. A whole-file writer cannot fold with anything: it
+            // would obliterate whatever was spliced under it, silently and
+            // config-order-dependently, which is the bug #44 names.
+            let written = match u.kind {
+                Template => u.output.as_deref().map(|p| (p, true)),
+                _ => u.path.as_deref().map(|p| (p, false)),
+            };
+            if let Some((p, whole)) = written {
+                if let Some((other, _, other_whole)) = outputs.iter().find(|(_, q, _)| *q == p)
+                    && (whole || *other_whole)
+                {
+                    out.push(
+                        Finding::problem(
+                            key.clone(),
+                            format!("writes `{p}`, which '{other}' also writes"),
+                        )
+                        .with_help(
+                            "a `template` updater renders the whole file, so it cannot share one                              with another updater — last-writer-wins would depend on config order",
+                        ),
+                    );
                 }
-                outputs.push((name.as_str(), o.as_str()));
+                outputs.push((name.as_str(), p, whole));
             }
         }
 

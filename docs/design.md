@@ -188,6 +188,7 @@ adapters cheap instead of a rewrite.
 | 96 | Within one run, releases are created in **config order (#31), umbrella last**. Deterministic, so the forge-call log is assertable; umbrella last, so its embedded manifest describes work already done rather than work in flight |
 | 97 | A **derived** release (#22) still writes its changelog entry — never skipped. The notes context carries `derived_from` (the package and version that caused it), and the default template renders one line naming the cause when the release has no commits of its own. Core supplies the fact as data; the template decides the words (#46) |
 | 98 | An unknown scope is fatal **only on a commit that can release** (#11). A type whose section is `bump = "none"` has no attribution to get wrong, and `chore(deps): bump serde` — the design's own canonical non-releasable example (#36) — names no package on any repo. `check` reports it as a **warning**, so it stays visible without blocking a release |
+| 99 | Updater edits **fold** rather than collide. Two surgical updaters may write one file — a `values.yaml` holding both `image.tag` and `labels.version` is ordinary — so each transforms the content the run has so far, in config order (#31), and one `FileEdit` per path comes out. #44's hard error is narrowed to what genuinely cannot fold: a **whole-file** writer (`template`) sharing a path with anything |
 
 ---
 
@@ -1115,7 +1116,7 @@ A package owns a **list** of updaters. This collapses what were three separate c
 |---|---|---|
 | `cargo` | `Cargo.toml` `version` | `toml_edit` preserves formatting and comments; `version.workspace = true` redirects to the workspace root (see #24) |
 | `helm` | `Chart.yaml` `version`, `appVersion` | `appVersion` may `track` another package; `on_tracked_bump` sets the derived bump size |
-| `generic` | one value in any file | In-place surgical edit; the file stays the user's |
+| `generic` | one value in any file | In-place surgical edit; the file stays the user's. `edit` is a table with exactly one key — `{ toml = … }`, `{ yaml = … }`, `{ json = … }` or `{ marker = … }` — and is **required**, since naming a file and no value in it would be a silent no-op |
 | `template` | a whole file | minijinja render; cicada owns the output file |
 
 ### Two addressing modes (#50)
@@ -1499,6 +1500,18 @@ derived from commit text.
 already declare their own paths, and repo-root resolution removes the ambiguity. Two updaters declaring the
 same `output` path is a **hard error**: last-writer-wins would be a silent, config-order-dependent bug.
 
+**But two updaters sharing a file is not automatically that bug** (#99). `FileEdit` carries *final content*,
+so a naive implementation emits two edits for one path and the second silently wins — which is exactly the
+harm above. The legitimate case is common, though: one `values.yaml` carrying `image.tag` and
+`labels.version`, or two services stamping their own tag into one deploy file. So edits **fold** — each
+updater transforms the content the run has for that path so far, not what is on disk, in config order — and
+one `FileEdit` per path comes out at the end.
+
+What genuinely cannot fold is a **whole-file** writer. A `template` updater renders the entire output and
+would obliterate any surgical edit under it, config-order-dependently and without a word. That is the
+collision the hard error is for, and `check` refuses it before any file is opened: a `template` `output`
+sharing a path with *any* other updater, including another template.
+
 ---
 
 ## Tech choices
@@ -1573,7 +1586,7 @@ Two sequencing principles, both learned from the decisions above:
 |---|---|---|
 | **M0** | Workspace (`cicada-core` pure + `cicada`), config parsing, `GitBackend` + subprocess impl, conventional-commit parser (multi-scope, breaking, footers). ~~Spike: span-preserving YAML splice~~ **done** | `cicada check` lints a range with did-you-mean suggestions. ✅ Spike complete: `spikes/yaml-splice`, 15 cases green |
 | **M1** | Anchor resolution (per-package ranges, tag reachability), scope routing incl. `default_scope`, bump computation (section `bump`, first-release table, `pre_major`, `maintenance` guard), umbrella aggregation, `Plan`. **done** | ✅ `cicada plan --json` correct on a fixture **monorepo and a single-package repo through the same code path**, fully offline. 111 tests green. One gap: a branch matching `prerelease_branches` refuses rather than reporting a stable version |
-| **M2** | Updaters (cargo, helm, generic path + marker, template), minijinja notes template with three contexts + filters + `template print`, changelog marker insert/create, versions-file write, `FileEdit` boundary | `release-pr --dry-run` prints exactly the diff it would write; snapshot tests green; duplicate-output and re-parse checks fire |
+| **M2** | Updaters (cargo, helm, generic path + marker, template), minijinja notes template with three contexts + filters + `template print`, changelog marker insert/create, versions-file write, `FileEdit` boundary. **done** | ✅ `release-pr --dry-run` prints exactly the diff it would write; duplicate-output and re-parse checks fire. 198 tests green |
 | **M3** | Git write path: release PR branch reset/commit, committer identity, `release_branches` allowlist, templated `release_pr_branch`, `--no-push` end to end | **`release-pr --no-push` produces a real local release commit**, inspectable with `git show`. First dogfooding gate — no token, no network |
 | **M4** | `Forge` trait (9 methods) + GitHub adapter, upsert by head branch, auth via `GIT_ASKPASS`, retries/error mapping, **staleness model** (committer guard, draft, comment, close on empty plan) | Real release PR on GitHub; hand-editing the release PR branch makes cicada refuse, draft the PR, and fail loudly |
 | **M5** | Phase B: tag reconciliation (reachability + collision), **independent release-object reconciliation**, stale-merge detection, release manifest (disk + embedded), `cicada run` ordering | merge → tag → release; re-run is a no-op; a simulated failed release call self-heals on the next run; a maintenance branch releases independently of `main` |

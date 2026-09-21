@@ -69,4 +69,11 @@ pub trait GitBackend {
 
     /// Checked up front so a truncated history is never mistaken for a short one.
     fn assert_not_shallow(&self) -> Result<(), GitError>;
+
+    /// A remote's URL, or `None` when the remote is not configured.
+    ///
+    /// Used for one thing: deriving `org/repo` for changelog links when config
+    /// does not state it. It is **never** how `forge.kind` is decided (#66) —
+    /// a wrong link costs a 404, a wrong forge costs a release.
+    fn remote_url(&self, name: &str) -> Result<Option<String>, GitError>;
 }

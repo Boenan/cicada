@@ -1,0 +1,7 @@
+## {{ version }} ({{ date }})
+
+{% for r in releases -%}
+### {{ r.package }} {{ r.version }}
+
+{{ r.notes }}
+{% endfor -%}

@@ -204,12 +204,49 @@ pub struct Updater {
     pub template: Option<String>,
     #[serde(default)]
     pub output: Option<String>,
+    /// How a `generic` updater addresses the value it rewrites (#50).
     #[serde(default)]
-    pub edit: Option<toml::Value>,
+    pub edit: Option<Edit>,
     #[serde(default)]
     pub app_version: Option<AppVersion>,
     #[serde(default)]
     pub on_tracked_bump: Option<TrackedBump>,
+}
+
+/// The two addressing modes (#50), which look similar in config and are different
+/// mechanisms with different reach.
+///
+/// **Path addressing** — `toml`, `yaml`, `json` — requires a structured format and
+/// addresses a node precisely. **Marker comments** work on *any* text file:
+/// Dockerfile, Makefile, `version.go`, a shell script. The marker is the escape
+/// hatch for the ecosystems deferred out of v1 (future-work §3) — a Go or Python
+/// service is served today without waiting for a dedicated `kind`.
+///
+/// Written in TOML as a table with exactly one key: `edit = { yaml = "image.tag" }`.
+/// Two keys is a parse error, which is #67 applied one level down.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Edit {
+    /// `edit = { toml = "package.version" }`
+    Toml(String),
+    /// `edit = { yaml = "image.tag" }`
+    Yaml(String),
+    /// `edit = { json = "$.version" }`
+    Json(String),
+    /// `edit = { marker = "x-cicada-version" }` — the comment token to look for.
+    Marker(String),
+}
+
+impl Edit {
+    /// How this edit is named in errors and in the dry-run header.
+    pub fn describe(&self) -> String {
+        match self {
+            Edit::Toml(p) => format!("toml `{p}`"),
+            Edit::Yaml(p) => format!("yaml `{p}`"),
+            Edit::Json(p) => format!("json `{p}`"),
+            Edit::Marker(m) => format!("marker `{m}`"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]

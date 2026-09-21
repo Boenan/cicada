@@ -149,6 +149,12 @@ impl GitBackend for GitCli {
         Ok(out.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
     }
 
+    fn remote_url(&self, name: &str) -> Result<Option<String>, GitError> {
+        Ok(run_opt(&self.root, &["remote", "get-url", name])?
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()))
+    }
+
     fn assert_not_shallow(&self) -> Result<(), GitError> {
         if self.git(&["rev-parse", "--is-shallow-repository"])?.trim() == "true" {
             return Err(GitError::ShallowClone);

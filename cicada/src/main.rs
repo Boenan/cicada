@@ -13,7 +13,7 @@ use cicada_core::check::{Finding, Severity, lint_commits, validate_config, valid
 use cicada_core::plan::{PlanError, PlanInput};
 use cicada::git::{GitBackend, GitCli};
 use cicada::report::Style;
-use cicada::{config, history, report, versions};
+use cicada::{config, history, prepare, report, versions};
 
 /// Exit codes are a contract, not an implementation detail (#68). CI branches on
 /// them, so `3` (your commits are malformed) and `4` (cicada declined to act) are
@@ -61,6 +61,15 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+enum TemplateCmd {
+    /// Write a built-in template to stdout.
+    Print {
+        /// One of `notes`, `changelog`, `umbrella`, `changelog-header`.
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum Command {
     /// Validate the config and lint a range of commits.
     ///
@@ -73,6 +82,25 @@ enum Command {
         /// Where the range ends. Defaults to HEAD.
         #[arg(long, value_name = "REF", default_value = "HEAD")]
         head: String,
+    },
+
+    /// Phase A — compute the release, write the files, open the PR.
+    ///
+    /// In this build only `--dry-run` is implemented: it prints exactly the diff
+    /// it would write (#30). The git write path lands in M3 and the forge in M4.
+    ReleasePr {
+        /// Compute and print the diff; write nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Write and commit locally, but push nothing. Lands in M3.
+        #[arg(long)]
+        no_push: bool,
+    },
+
+    /// Emit a built-in template, so customising starts from the real thing (#48).
+    Template {
+        #[command(subcommand)]
+        what: TemplateCmd,
     },
 
     /// What would be released, and why. Touches nothing.
@@ -117,6 +145,28 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
     match &cli.command {
         Command::Check { base, head } => cmd_check(cli, base.as_deref(), head),
         Command::Plan => cmd_plan(cli),
+        Command::ReleasePr { dry_run, no_push } => cmd_release_pr(cli, *dry_run, *no_push),
+        Command::Template { what } => match what {
+            TemplateCmd::Print { name } => cmd_template_print(name),
+        },
+    }
+}
+
+/// `cicada template print <name>` (#48).
+///
+/// Deliberately the opposite of release-please, whose changelog format is hard to
+/// customise *because* you cannot see the template you are trying to deviate from.
+fn cmd_template_print(name: &str) -> anyhow::Result<u8> {
+    match cicada_core::template::built_in(name) {
+        Some(src) => {
+            print!("{src}");
+            Ok(exit::OK)
+        }
+        None => anyhow::bail!(
+            "no built-in template named `{name}`
+available: {}",
+            cicada_core::template::built_in_names().join(", ")
+        ),
     }
 }
 
@@ -245,7 +295,29 @@ fn gather_config_findings(
     findings
 }
 
-fn cmd_plan(cli: &Cli) -> anyhow::Result<u8> {
+/// Everything `plan` and `release-pr` both do before they diverge: discover the
+/// repo, load and validate the config, classify the branch, resolve anchors, and
+/// compute the plan.
+///
+/// Kept in one place because the *order* matters and is easy to get subtly wrong:
+/// shallow detection precedes any range (H8), config validation precedes any
+/// git work, and the prerelease refusal precedes planning rather than following it.
+struct Prepared {
+    repo: GitCli,
+    loaded: config::Loaded,
+    branch: String,
+    on_release_branch: bool,
+    versions: versions::Loaded,
+    plan: cicada_core::plan::Plan,
+}
+
+enum Prep {
+    Ready(Box<Prepared>),
+    /// An exit code that is the whole answer — a refusal, or the branch gate.
+    Exit(u8),
+}
+
+fn prepare_run(cli: &Cli) -> anyhow::Result<Prep> {
     let cwd = std::env::current_dir()?;
     let repo = GitCli::discover(&cwd)?;
 
@@ -269,11 +341,11 @@ fn cmd_plan(cli: &Cli) -> anyhow::Result<u8> {
     let maintenance =
         cicada_core::branch::matches_any(&cfg.settings.maintenance_branches, &branch_name)?;
 
-    // The one deliberate gap in M1. A prerelease branch would compute a *stable*
-    // version here, which is not a missing feature but a wrong answer — and a
-    // plan that lies offline defeats the point of it running offline (§Goals 6).
-    // Refusing is loud; computing would be quiet. Deleting this block is what
-    // lands prerelease support.
+    // The one deliberate gap left from M1. A prerelease branch would compute a
+    // *stable* version here, which is not a missing feature but a wrong answer —
+    // and a plan that lies offline defeats the point of it running offline
+    // (§Goals 6). Refusing is loud; computing would be quiet. Deleting this block
+    // is what lands prerelease support.
     if cicada_core::branch::matches_any(&cfg.settings.prerelease_branches, &branch_name)? {
         anyhow::bail!(
             "'{branch_name}' matches `prerelease_branches`, and prerelease planning is not \
@@ -307,38 +379,131 @@ fn cmd_plan(cli: &Cli) -> anyhow::Result<u8> {
         // — a pipeline may well want to handle them differently.
         Err(e @ PlanError::MaintenanceGuard { .. }) => {
             eprintln!("error: {e}");
-            return Ok(exit::REFUSED);
+            return Ok(Prep::Exit(exit::REFUSED));
         }
         // An unknown scope is fatal for the whole run (#11, O5): releasing the
         // half that parsed would cut a version whose changelog is missing the
         // change that motivated it.
         Err(e) => {
             eprintln!("error: {e}");
-            return Ok(exit::ERROR);
+            return Ok(Prep::Exit(exit::ERROR));
         }
     };
 
+    Ok(Prep::Ready(Box::new(Prepared {
+        repo,
+        loaded,
+        branch: branch_name,
+        on_release_branch,
+        versions,
+        plan,
+    })))
+}
+
+fn cmd_plan(cli: &Cli) -> anyhow::Result<u8> {
+    let p = match prepare_run(cli)? {
+        Prep::Ready(p) => p,
+        Prep::Exit(code) => return Ok(code),
+    };
     let date = cli.date.unwrap_or_else(today_utc);
 
     if cli.json {
-        print!("{}", plan_json(&date, &branch_name, on_release_branch, &plan));
+        print!("{}", plan_json(&date, &p.branch, p.on_release_branch, &p.plan));
     } else if !cli.quiet {
         let style = Style::detect();
-        print!("{}", report::render_plan(&style, &plan));
-        if !on_release_branch {
+        print!("{}", report::render_plan(&style, &p.plan));
+        if !p.on_release_branch {
             // Not an error: `plan` is a question, and the answer is the same
             // wherever it is asked. But `run` here would exit 0 without acting
             // (#26, H1), and discovering that from a silent pipeline is worse
             // than reading it now.
             eprintln!(
-                "\nnote: '{branch_name}' matches no `release_branches` pattern — `cicada run` \
-                 would exit 0 here without releasing"
+                "\nnote: '{}' matches no `release_branches` pattern — `cicada run` would exit 0 \
+                 here without releasing",
+                p.branch
             );
         }
     }
 
     // "Nothing to release" is a normal outcome, not a failure (#68).
     Ok(exit::OK)
+}
+
+/// Phase A, as far as this build goes: compute the plan, render it to
+/// `Vec<FileEdit>`, and print the diff.
+fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8> {
+    let p = match prepare_run(cli)? {
+        Prep::Ready(p) => p,
+        Prep::Exit(code) => return Ok(code),
+    };
+    let cfg = &p.loaded.config;
+    let style = Style::detect();
+
+    // The gate (#26). Unlike `plan`, this command writes — so a branch outside
+    // `release_branches` exits 0 quietly rather than being asked to explain
+    // itself (H1).
+    if !p.on_release_branch {
+        tracing::info!(branch = %p.branch, "not a release branch; nothing to do");
+        return Ok(exit::OK);
+    }
+
+    if p.plan.is_empty() {
+        if !cli.quiet {
+            print!("{}", report::summarise_edits(&style, 0));
+        }
+        return Ok(exit::OK);
+    }
+
+    let root = p.repo.root();
+    let date = cli.date.unwrap_or_else(today_utc);
+
+    // `forge.repo` when stated, otherwise derived from `origin`. Deriving is fine
+    // here and nowhere near `forge.kind` (#66): a wrong link costs a 404 in a
+    // changelog, a wrong forge costs a release.
+    let repo_slug = cfg.forge.repo.clone().or_else(|| {
+        p.repo.remote_url("origin").ok().flatten().as_deref().and_then(prepare::repo_from_remote)
+    });
+    let links = prepare::link_style(cfg, repo_slug.as_deref());
+
+    // Resolved first: `sources` must read the redirect targets as well as the
+    // declared paths.
+    let workspace_roots = prepare::workspace_roots(root, cfg, &p.plan);
+    let sources = prepare::sources(root, cfg, &p.plan, &workspace_roots)?;
+    let overrides = prepare::overrides(root);
+
+    let rendered = cicada_core::render::render(&cicada_core::render::RenderInput {
+        config: cfg,
+        plan: &p.plan,
+        versions: &p.versions.versions,
+        date: &date.to_string(),
+        links: &links,
+        sources: &sources,
+        workspace_roots: &workspace_roots,
+        overrides: &overrides,
+    })?;
+
+    for w in &rendered.warnings {
+        eprintln!("warning: {w}");
+    }
+
+    if dry_run {
+        if !cli.quiet {
+            print!("{}", report::render_diff(&style, &rendered.edits, &sources));
+            print!("{}", report::summarise_edits(&style, rendered.edits.len()));
+        }
+        return Ok(exit::OK);
+    }
+
+    // M3 is the git write path: reset the release PR branch, commit as the
+    // configured committer, and (M4) upsert the PR. Writing the files without any
+    // of that would leave a dirty tree with no branch to carry it, which is worse
+    // than not writing them.
+    let _ = no_push;
+    anyhow::bail!(
+        "only `--dry-run` is implemented in this build: the release commit and branch land in M3, \
+         the pull request in M4\nthe plan and the diff are correct now — `cicada release-pr \
+         --dry-run` prints exactly what would be written"
+    );
 }
 
 /// The `plan --json` payload (#69).

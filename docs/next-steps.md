@@ -9,13 +9,14 @@ next* and *what is easy to get wrong*.
 
 | | |
 |---|---|
-| **Design** | Complete. `docs/design.md`, 98 numbered decisions, every section walked and argued through. **No open questions** |
+| **Design** | Complete. `docs/design.md`, 99 numbered decisions, every section walked and argued through. **No open questions** |
 | **Behavioural coverage** | `docs/scenarios/single-service.md` (~140 scenarios, groups A–N) and `docs/scenarios/monorepo.md` (groups O–Y, only what needs N > 1), in five-surface form, doubling as the acceptance suite. Four HTML walkthroughs under `docs/scenarios/single-service/` |
 | **Deferred scope** | `docs/future-work.md`, 16 items, each with why it was deferred and what would trigger it |
 | **M0 spike** | **Done and confirmed.** `spikes/yaml-splice`, 15 tests green |
 | **M0** | **Done.** Two-crate workspace, config parsing, `GitBackend` + subprocess impl, conventional-commit parser, `cicada check`. 52 tests green |
-| **M1** | **Done.** Versions file, scope routing, bump computation, chart tracking, umbrella aggregation, anchor resolution, `Plan`, `cicada plan [--json]`. 111 tests green. One gap: prereleases — see below |
-| **Production code** | `cicada-core/` (pure) and `cicada/` (lib + bin). Next milestone is M2 |
+| **M1** | **Done.** Versions file, scope routing, bump computation, chart tracking, umbrella aggregation, anchor resolution, `Plan`, `cicada plan [--json]` |
+| **M2** | **Done.** Updaters (cargo, helm, generic path + marker, template), templates with three contexts + filters + `template print`, changelog insertion, versions-file write, the `FileEdit` boundary, `release-pr --dry-run`. 198 tests green. One gap: prereleases — see below |
+| **Production code** | `cicada-core/` (pure) and `cicada/` (lib + bin). Next milestone is M3 |
 
 **The scenario pass rewrote parts of the design.** Decisions #73–#85 all came out of writing expected
 outcomes down, and four earlier decisions were reversed outright — see *Do not re-litigate* below, and note
@@ -178,6 +179,57 @@ the last *stable* (#61). The versions file already parses the `prerelease` field
 
 ---
 
+## M2 is done
+
+**Exit criterion met:** `cicada release-pr --dry-run` prints exactly the diff it would write, and the
+working tree is asserted unchanged afterwards — a dry run that writes is not a dry run. Duplicate-output and
+post-write re-parse checks both fire.
+
+What landed, and where:
+
+| Piece | Location |
+|---|---|
+| `FileEdit` — the compute/perform boundary (#30) | `cicada-core/src/edit.rs` |
+| Versions-file writer (#1, #75) | `cicada-core/src/versions.rs` |
+| `cargo` updater, incl. the workspace redirect (#24) | `cicada-core/src/updater/cargo.rs` |
+| `helm` updater, `appVersion` always quoted (#51) | `cicada-core/src/updater/helm.rs` |
+| YAML byte-splice, promoted from the spike (#49, #71, #72) | `cicada-core/src/updater/yaml.rs` |
+| TOML / JSON path editing, marker comments (#50) | `cicada-core/src/updater/{toml_path,json,marker}.rs` |
+| minijinja env, `\| yaml`/`\| json`/`\| md`, built-ins (#43–#48) | `cicada-core/src/template.rs`, `src/templates/` |
+| The three contexts and `LinkStyle` (#46, A2) | `cicada-core/src/notes.rs` |
+| Changelog marker / prepend / create (#5) | `cicada-core/src/changelog.rs` |
+| `Plan` → `Vec<FileEdit>` (#30, #99) | `cicada-core/src/render.rs` |
+| Reading sources, workspace roots, overrides, links | `cicada/src/prepare.rs` |
+| `release-pr --dry-run`, `template print`, the diff | `cicada/src/main.rs`, `src/report.rs` |
+
+**Four things the build settled that the design had left implicit:**
+
+1. **Updater edits fold** — now #99. `FileEdit` carries *final content*, so two updaters on one file would
+   mean last-writer-wins, silently. But two surgical edits on one `values.yaml` is an ordinary thing to want,
+   so each transforms what the run has so far, in config order. #44's hard error narrows to the case that
+   genuinely cannot fold: a `template` sharing a path with anything.
+2. **`edit` is a typed enum and is required on `generic`.** It was an untyped `toml::Value`, which meant a
+   misspelled addressing mode was a runtime surprise rather than a parse error (#67). A `generic` updater
+   with no `edit` names a file and no value in it — a silent no-op, now a `check` finding.
+3. **The cargo workspace redirect needs a flag, not a re-derivation.** Whether to write `[package] version`
+   or `[workspace.package] version` cannot be recovered from the file's contents: a workspace root may be a
+   real package too, carrying both keys. Whether the redirect happened is knowledge the caller has and the
+   content does not.
+4. **`prepare::sources` must read the redirect *target*.** Found by dogfooding — cicada's own repo is exactly
+   this shape, and `release-pr --dry-run` failed with `no value at the file itself` because only the declared
+   path had been read.
+
+**Two formatting bugs the tests caught, both in the claim #49 rests on:**
+
+- **`*item = value(new)` deletes the trailing comment on the edited line.** A `toml_edit` `Value` owns its
+  surrounding decor, so assigning a fresh one drops it — on the one line a reader is most likely to have
+  annotated. Both the `cargo` and `generic (toml)` paths had it; `replace_preserving_decor` is the fix and
+  the fixtures now carry a comment *on the version line* rather than only near it.
+- **A template's leading newline widened every changelog by a blank line.** The frame owns the spacing around
+  an entry, so the rendered body is trimmed at both ends and a template's whitespace control cannot leak.
+
+---
+
 ## Constraints that are easy to violate
 
 These are cheap to honour from the start and expensive to retrofit:
@@ -202,6 +254,8 @@ These are cheap to honour from the start and expensive to retrofit:
 | #88 | `initial_version` is required on a package with a `helm` updater, and `Chart.yaml` is still never read back (#75). The requirement exists so cicada never invents a chart's first version |
 | #97 | A derived release still writes a changelog entry. It has no commits, so the body comes from `derived_from` in the notes context — never an empty entry, never a skipped one, and never prose emitted by core |
 | #96 | Releases are created in config order, umbrella last. Deterministic ordering is what makes the forge-call log assertable, and the umbrella's body embeds a manifest describing the releases created before it |
+| #99 | Updater edits **fold**, one `FileEdit` per path, in config order. Emitting one edit per *updater* reintroduces last-writer-wins — the exact bug #44 names — and it is silent. The hard error is only for a whole-file writer sharing a path |
+| #52 | Every edited file is re-parsed **before anything is written**. The check is inside the transform, so a bad splice cannot reach the working tree even on the path that writes without committing |
 | #98 | An unknown scope is fatal only on a commit that **can release**. Widening it back to every commit breaks every repo whose dependency bot writes `chore(deps):` — including this design's own worked example (B8/B9). Narrowing it further, so a releasable commit's bad scope is tolerated, is the silent misfiling #11 exists to prevent |
 | #95 | The date is an **input**, never a clock read inside `cicada-core`. It feeds changelog entry dates and nothing else, but an ambient read would make core impure and let `--dry-run` disagree with the run that follows it |
 
@@ -286,29 +340,26 @@ Four features were removed rather than deferred quietly, and two of them change 
 
 ---
 
-## Next: M2
+## Next: M3
 
-Updaters (cargo, helm, generic path + marker, template), the minijinja notes template with three contexts +
-filters + `template print`, changelog marker insert/create, versions-file **write**, and the `FileEdit`
-boundary. Exit criterion: `release-pr --dry-run` prints exactly the diff it would write; snapshot tests
-green; duplicate-output and re-parse checks fire.
+The git write path: reset the release PR branch, write the edits, commit as the configured committer, and
+`--no-push` end to end. Exit criterion: **`release-pr --no-push` produces a real local release commit**,
+inspectable with `git show`. This is the first dogfooding gate — no token, no network.
 
-M1 leaves M2 well placed. The `Plan` already carries everything the renderers need — `from`, `to`, `bump`,
-`reason`, `tag`, the routed commits, and `derived_from` (#97) — so M2 is a function from `Plan` to
-`Vec<FileEdit>` with no further computation. Three things to carry in:
+M2 leaves one function to call. `cicada::prepare::apply` already writes a `Vec<FileEdit>` to the tree; what
+M3 adds around it is branch and commit management:
 
-- **`--date` already exists and is already threaded** (#95). It reaches the binary as a value and has exactly
-  one consumer: the date on a changelog entry. Do not let a clock read into `cicada-core` to save passing it.
-- **The `FileEdit` boundary is the point** (#30). Core returns path plus final content; the I/O layer only
-  writes. `--dry-run` must be the identical computation with the write skipped, which H5 asserts directly by
-  comparing the `Vec<FileEdit>` from `--dry-run` and `--no-push`.
-- **`.cicada-versions.toml` gains a writer.** The reader is in `cicada-core/src/versions.rs`; the writer
-  belongs beside it as a pure `VersionsFile -> String`, so the versions file is a `FileEdit` like every other
-  output rather than a special case that bypasses the boundary.
+- **The write half of `GitBackend`.** `branch_reset`, `add`, `commit_as`, `tag`, `push` — the read half
+  (`log`, `rev_parse`, `is_ancestor`, `tags`, `remote_url`) is done and tested.
+- **The release PR branch is replaced, never updated** (#27, #32). Reset `cicada/{branch}` to HEAD, write,
+  commit, force-push. Nothing is ever merged *into* it, so there is never a conflict to resolve — the branch
+  holds exactly one commit that is a pure function of the current repo state.
+- **The committer identity is load-bearing** (#55). #32 decides whether to clobber the branch by asking
+  whether its tip is cicada's own commit, so the identity must be configurable and stable across versions.
+- **H5 becomes assertable for real.** The test the design asks for is that the `Vec<FileEdit>` from
+  `--dry-run` and from `--no-push` are *equal*. M2 asserts the dry-run half; M3 closes it.
 
-The spike (`spikes/yaml-splice`) is the foundation for the `generic` and `helm` updaters and its two traps —
-char-vs-byte indexing (#71) and tolerating aliases outside the target (#72) — must survive as regression
-tests in the real updater, not only in the spike.
+Delete the `anyhow::bail!` at the end of `cmd_release_pr` — it names M3 explicitly and is the seam.
 
 ---
 

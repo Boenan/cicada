@@ -191,3 +191,55 @@ pub fn json_escape(s: &str) -> String {
     }
     out
 }
+
+// --- the dry-run diff ----------------------------------------------------
+
+/// What `release-pr --dry-run` prints: a real unified diff of the edits cicada
+/// would write (#30).
+///
+/// A diff rather than a summary, because the claim being made is *these exact
+/// bytes*. A list of filenames would be a description of the computation; this is
+/// the computation's output.
+pub fn render_diff(
+    style: &Style,
+    edits: &[cicada_core::edit::FileEdit],
+    sources: &std::collections::BTreeMap<String, String>,
+) -> String {
+    let mut out = String::new();
+    for e in edits {
+        let before = sources.get(&e.path).map(String::as_str).unwrap_or("");
+        let new_file = !sources.contains_key(&e.path);
+
+        out.push_str(&format!(
+            "{} {}\n",
+            style.dim(if new_file { "+++ new" } else { "---" }),
+            e.path
+        ));
+        out.push_str(&format!("{}\n", style.dim(&format!("    {}", e.source))));
+
+        let diff = similar::TextDiff::from_lines(before, &e.content);
+        for group in diff.grouped_ops(3) {
+            for op in group {
+                for change in diff.iter_changes(&op) {
+                    let (sign, paint): (&str, fn(&Style, &str) -> String) = match change.tag() {
+                        similar::ChangeTag::Delete => ("-", Style::red),
+                        similar::ChangeTag::Insert => ("+", Style::green),
+                        similar::ChangeTag::Equal => (" ", Style::dim),
+                    };
+                    let text = change.value();
+                    out.push_str(&paint(style, &format!("  {sign} {}", text.trim_end_matches('\n'))));
+                    out.push('\n');
+                }
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+pub fn summarise_edits(style: &Style, n: usize) -> String {
+    if n == 0 {
+        return format!("  {}\n", style.dim("nothing to release"));
+    }
+    format!("  {} file{} would be written\n", n, plural(n))
+}
