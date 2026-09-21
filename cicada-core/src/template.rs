@@ -31,9 +31,19 @@ pub const CHANGELOG: &str = include_str!("templates/changelog.md.j2");
 /// The umbrella's changelog entry, grouped by service (#15).
 pub const UMBRELLA: &str = include_str!("templates/umbrella.md.j2");
 
-/// The header a `CHANGELOG.md` is created with when none exists (#5). Carries the
-/// insert marker, so every later release takes the marker path rather than the
-/// prepend-after-header fallback.
+/// The header a `CHANGELOG.md` is created with when none exists (#5).
+///
+/// Two lines, and deliberately no prose. Both earn their place mechanically: the
+/// `# Changelog` heading gives the prepend-after-header fallback something to
+/// anchor on, and the marker means every later release takes the stable insert
+/// path instead of that fallback.
+///
+/// What is **not** here is a blurb explaining what a changelog is or which commit
+/// convention produced it. cicada is writing into someone else's repository, and
+/// asserting prose there is the same mistake #97 refuses when it makes
+/// `derived_from` data rather than a sentence cicada emits. A repo that wants a
+/// preamble adds one — this file is printable and overridable like any other
+/// template (#47, #48).
 pub const CHANGELOG_HEADER: &str = include_str!("templates/changelog-header.md");
 
 /// Every built-in, by the name `cicada template print <name>` accepts.

@@ -385,8 +385,8 @@ fn commit_links_appear_only_when_the_forge_supplied_a_style() {
     // A2 — links are a value, so `plan`/`--no-push` with no forge renders notes
     // without links rather than with broken ones.
     let plain = Case::new(SHAPE_1).source("Cargo.toml", CARGO).run(&["feat: add export"]);
-    // Asserted on the entry body rather than the file: the created header carries
-    // a link of its own, which says nothing about commit links.
+    // Asserted on the entry body rather than the whole file, so this stays a
+    // statement about commit links whatever the header happens to contain.
     let body = plain.notes.get(&Target::Package(PackageId(0))).unwrap();
     assert!(!body.contains(']'), "no links without a style:\n{body}");
 
