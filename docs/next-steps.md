@@ -9,7 +9,7 @@ next* and *what is easy to get wrong*.
 
 | | |
 |---|---|
-| **Design** | Complete. `docs/design.md`, 102 numbered decisions, every section walked and argued through. **No open questions** |
+| **Design** | Complete. `docs/design.md`, 103 numbered decisions, every section walked and argued through. **No open questions** |
 | **Behavioural coverage** | `docs/scenarios/single-service.md` (~140 scenarios, groups A–N) and `docs/scenarios/monorepo.md` (groups O–Y, only what needs N > 1), in five-surface form, doubling as the acceptance suite. Four HTML walkthroughs under `docs/scenarios/single-service/` |
 | **Deferred scope** | `docs/future-work.md`, 16 items, each with why it was deferred and what would trigger it |
 | **M0 spike** | **Done and confirmed.** `spikes/yaml-splice`, 15 tests green |
@@ -17,8 +17,9 @@ next* and *what is easy to get wrong*.
 | **M1** | **Done.** Versions file, scope routing, bump computation, chart tracking, umbrella aggregation, anchor resolution, `Plan`, `cicada plan [--json]` |
 | **M2** | **Done.** Updaters (cargo, helm, generic path + marker, template), templates with three contexts + filters + `template print`, changelog insertion, versions-file write, the `FileEdit` boundary, `release-pr --dry-run` |
 | **M3** | **Done.** The git write path: release PR branch, committer identity, the #32 refusal, the #80 collision check, `--no-push` end to end |
-| **M4** | **Built; one half unverified.** `Forge` trait + GitHub adapter, `GIT_ASKPASS` auth, fetch/push with a lease, the staleness model's forge half. 251 tests green. **Real HTTP against github.com is not yet exercised** — see below |
-| **Production code** | `cicada-core/` (pure) and `cicada/` (lib + bin). Next milestone is M5 |
+| **M4** | **Built; one half unverified.** `Forge` trait + GitHub adapter, `GIT_ASKPASS` auth, fetch/push with a lease, the staleness model's forge half. **Real HTTP against github.com is not yet exercised** |
+| **M5** | **Done.** Phase B: tag and release-object reconciliation, the stale-merge and monotonicity guards, the manifest, `cicada run`. 275 tests green |
+| **Production code** | `cicada-core/` (pure) and `cicada/` (lib + bin). Next milestone is M6 |
 
 **The scenario pass rewrote parts of the design.** Decisions #73–#85 all came out of writing expected
 outcomes down, and four earlier decisions were reversed outright — see *Do not re-litigate* below, and note
@@ -323,6 +324,60 @@ REST cannot express. Recorded as #102; the visible consequence is that `set_draf
 
 ---
 
+## M5 is done — cicada is an end-to-end release tool
+
+**Exit criterion met**, all four parts: merge → tag → release; a re-run is a total no-op; a tag with no
+release object self-heals on the next run (#56); and a maintenance branch releases independently of `main`.
+
+Verified end to end on a real repository with `--no-push`:
+
+```
+run 1   nothing to reconcile · cicada/main committed        (B finds nothing, A writes the release)
+merge
+run 2   ✓ v0.1.0 tagged app  · nothing to release           (B tags, A's anchor now resolves)
+run 3   nothing to reconcile — 1 tag already in place       (idempotent)
+```
+
+The forge half still rests on the recording fake — that is M4's outstanding gate, not a new one.
+
+| Piece | Location |
+|---|---|
+| `parse_tag` — a version back out of a tag | `cicada-core/src/plan.rs` |
+| The release manifest (#42, #57) | `cicada-core/src/manifest.rs` |
+| `create_tag`, `push_tag` | `cicada/src/git/` |
+| Phase B, both guards, the dry-run view | `cicada/src/phase_b.rs` |
+| `cicada release`, `cicada run`, the shared `Context` | `cicada/src/main.rs` |
+
+### The design contradicted itself about downward edits
+
+J4b and E4 both claim the staleness guard catches a hand-edit *downwards* "with no extra machinery". It
+cannot. #90 selects `prev` from tags **below the recorded version**, so editing `1.4.2` down to `1.0.0`
+leaves no eligible `prev` at all — the recomputation becomes a *first release*, and `1.0.0` comfortably
+clears it. The two rules cannot both hold.
+
+Monotonicity is now its own check under the same #78 gate (#103): **a reachable stable tag above the
+recorded version is a refusal.** Reachability keeps it off parallel lines. Found by writing J4b as a test and
+watching it tag `v1.0.0` happily.
+
+### Two traps in the recomputation itself
+
+1. **The replan's base is `prev`, not the record.** `expected = plan(prev..HEAD)` means the range *and* the
+   arithmetic start from `prev`. Anchoring the range at `prev` while basing the bump on the recorded version
+   applies the bump twice — so an ordinary release recomputes one bump too high and the guard fires on every
+   run. Six tests failed at once, which is how it was caught.
+2. **The maintenance guard must be off in the replan.** It gates *opening* a release (#28); re-firing it in
+   Phase B would refuse to tag work that is already merged, and a stale merge onto a patch-only line is
+   caught by the guard that is actually about that situation.
+
+### Phase B's `--dry-run` is not a diff
+
+Phase B writes no files — it creates tags and release objects — so there is nothing to diff. It reports the
+two questions it asks per package and the answer it currently has: `already tagged`, `would be created`, or
+`exists elsewhere — would refuse`. A dry run that printed nothing would be the same silent-no-op bug the
+branch gate had.
+
+---
+
 ## Constraints that are easy to violate
 
 These are cheap to honour from the start and expensive to retrofit:
@@ -347,6 +402,9 @@ These are cheap to honour from the start and expensive to retrofit:
 | #88 | `initial_version` is required on a package with a `helm` updater, and `Chart.yaml` is still never read back (#75). The requirement exists so cicada never invents a chart's first version |
 | #97 | A derived release still writes a changelog entry. It has no commits, so the body comes from `derived_from` in the notes context — never an empty entry, never a skipped one, and never prose emitted by core |
 | #96 | Releases are created in config order, umbrella last. Deterministic ordering is what makes the forge-call log assertable, and the umbrella's body embeds a manifest describing the releases created before it |
+| #103 | Monotonicity is checked **directly**, not inferred from the staleness guard. The inference does not work — `prev` is chosen from tags *below* the record, so a downward edit leaves no `prev` and recomputes as a first release |
+| #78 | Both Phase B guards run **only** when a tag is about to be created. Unconditionally they fire on every ordinary push after a release, because the versions file only claims to describe HEAD at that one moment |
+| #35 | `cicada run` is Phase B **then** Phase A. Phase A's anchor resolves *because* Phase B just created the tag; the reverse order re-releases the just-merged work every cycle, silently |
 | #101 | The staleness guard's subject is the branch **about to be overwritten** — remote when pushing, local otherwise. Reading only `refs/heads/` makes it inert in CI, which is the one environment it exists for |
 | #18 | The token never reaches `argv`, `.git/config`, or a log. `Token` has no `Debug`/`Display` on purpose; adding one puts a credential in a CI log the first time someone writes `tracing::debug!(?token)` |
 | #100 | The release commit is built through a **private index**, never a checkout. The working tree, the real index and the current branch stay exactly as they were. Reintroducing a checkout breaks local rehearsal, error unwinding and concurrent runs at once |
@@ -437,35 +495,37 @@ Four features were removed rather than deferred quietly, and two of them change 
 
 ---
 
-## Next: verify M4, then M5
+## Next: verify M4, then M6–M8
 
-**First, the gate M4 has not passed.** Run it against a real repository with a token:
+**The outstanding gate is still M4's**, and it has not moved: the GitHub adapter's HTTP has never run. With
+Phase B in place the verification is now a full loop rather than half of one:
 
 ```
-CICADA_TOKEN=… cicada release-pr        # on a release branch, with something to release
+CICADA_TOKEN=… cicada run        # on a release branch, with something to release
 ```
 
-and check three things: the pull request opens with the notes as its body, a second run *updates* that same
-PR rather than opening another, and hand-editing `cicada/<branch>` then re-running drafts the PR, labels it
-`cicada:stale`, comments, and exits `4`. Those are the assertions the fake already makes; what is unproven is
-the HTTP underneath them. Expect the first failures to be in the places adapters always fail — the `head`
-qualifier on the PR search, the GraphQL mutation shape, and error bodies that are not JSON.
+Expect to check: the PR opens with the notes as its body; merging it and re-running creates the **tag** and
+the **release object**, with the manifest embedded in the release body; a third run does nothing; and
+hand-editing `cicada/<branch>` drafts the PR, labels it `cicada:stale`, comments, and exits `4`.
 
-**Then M5**, which is the first end-to-end release tool: Phase B — tag reconciliation with the reachability
-and collision checks, **independent** release-object reconciliation (#56), the stale-merge recomputation
-(#33 layer 3, #78, #90), the release manifest (#42, #57), and `cicada run` doing Phase B **before** Phase A
-(#35).
+The likely failure sites are unchanged — the `head` qualifier on the PR search, the GraphQL mutation shape,
+and error bodies that are not JSON — plus one new one: `create_release` needs the tag to exist on the
+**remote**, so a `--no-push` Phase B followed by a pushed one would fail there rather than locally.
 
-Three things M4 leaves ready for it:
+Then:
 
-- **`find_release` and `create_release` already exist** on the trait and in both the adapter and the fake,
-  and `find_release` returns `Ok(None)` on a 404 — absent is an answer, which is what makes tag and release
-  reconcile independently (#56).
-- **The notes are already rendered** and reused verbatim (#43), so the release body must take
-  `Rendered.notes`, not render again.
-- **`cicada run` needs Phase A and Phase B composed in one place.** That is the moment to lift the
-  orchestration out of `main.rs` the way the forge protocols were lifted into `forge/flow.rs` — CI must not
-  be able to express the broken order (#35), and a function that runs them in sequence is what guarantees it.
+- **M6** — the GitLab adapter. Nine methods against REST v4, `Draft:` as a title prefix rather than a field
+  (#54), self-hosted through `api_url`, and subgroup paths URL-encoded. `forge::build` already refuses
+  `kind = "gitlab"` by name, which is the seam.
+- **M7** — the shipped CI templates and the docs, including the CI-trigger footgun: the default
+  `GITHUB_TOKEN` does not trigger workflows on PRs it creates, so on an auto-merging repo a PAT or App token
+  is what makes the loop turn at all (§No review gate).
+- **M8** — musl binaries, multi-arch Docker with `git` in it, and cicada releasing itself (#21).
+
+**And the prerelease gap is still open.** It is now the only thing in the design that the code refuses
+rather than implements: `prepare_context` bails on a branch matching `prerelease_branches`. Everything it
+needs is specified (#59–#64, #85, #90, #93) and Phase B already reconciles a `prerelease` field when one is
+present — the counter rule and the monotonicity check are what remain.
 
 ---
 

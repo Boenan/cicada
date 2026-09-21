@@ -32,6 +32,28 @@ pub fn render_tag(format: &str, version: &Version) -> String {
     format.replace("{version}", &version.to_string())
 }
 
+/// Read a version back out of a tag, given the format that produced it.
+///
+/// The inverse of [`render_tag`], and the only way Phase B can ask "which
+/// versions of this package have ever been tagged?" — the versions file records
+/// one number, and the history of a line lives in its tags.
+///
+/// Deliberately strict: the tag must match the format exactly around
+/// `{version}`, so `api-v1.5.0` is `api`'s and `api-chart-v1.5.0` is not. Two
+/// packages whose formats could confuse each other are already refused by `check`
+/// (#9), but a *prefix* relationship like `api-` and `api-chart-` is legal and
+/// common, and it is this function that keeps them apart.
+pub fn parse_tag(format: &str, tag: &str) -> Option<Version> {
+    let (prefix, suffix) = format.split_once("{version}")?;
+    let rest = tag.strip_prefix(prefix)?;
+    let version = rest.strip_suffix(suffix)?;
+    // A tag for `api-chart` reaches here when parsed against `api-v{version}`
+    // only if the remainder still parses as semver, which `chart-v0.9.0` does
+    // not. Relying on the parse rather than on a character class keeps the rule
+    // in one place.
+    version.parse().ok()
+}
+
 /// Why this release is happening. Reported in `--json` and in the human plan, so
 /// a reader can tell an earned release from a consequence of someone else's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

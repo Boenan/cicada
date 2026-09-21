@@ -847,3 +847,54 @@ fn an_initial_version_that_is_not_semver_is_a_config_finding_not_a_silent_fallba
     let c = cfg(&format!("{SHAPE_1}initial_version = \"1.0.0\"\n"));
     assert!(validate_config(&c).is_empty());
 }
+
+// --- reading a version back out of a tag ---------------------------------
+
+#[test]
+fn a_tag_round_trips_through_its_format() {
+    use cicada_core::plan::{parse_tag, render_tag};
+    use semver::Version;
+
+    for (format, version) in [
+        ("v{version}", "1.5.0"),
+        ("api-v{version}", "1.5.0"),
+        ("{version}", "0.0.1"),
+        ("release/{version}", "2.0.0"),
+        ("v{version}-release", "1.0.0"),
+    ] {
+        let v: Version = version.parse().unwrap();
+        let tag = render_tag(format, &v);
+        assert_eq!(parse_tag(format, &tag), Some(v), "{format} / {tag}");
+    }
+}
+
+#[test]
+fn a_prefix_relationship_between_two_packages_does_not_confuse_them() {
+    // `api-` and `api-chart-` are legal together and common. Parsing
+    // `api-chart-v0.9.0` against `api-v{version}` leaves `chart-v0.9.0`, which is
+    // not semver — so the parse is what keeps the two lines apart.
+    use cicada_core::plan::parse_tag;
+    assert_eq!(parse_tag("api-v{version}", "api-chart-v0.9.0"), None);
+    assert_eq!(parse_tag("api-v{version}", "api-v1.5.0").unwrap().to_string(), "1.5.0");
+    assert_eq!(parse_tag("api-chart-v{version}", "api-chart-v0.9.0").unwrap().to_string(), "0.9.0");
+}
+
+#[test]
+fn a_prerelease_tag_parses_and_is_distinguishable_from_a_stable_one() {
+    // #90 — the staleness guard's `prev` must never select one of these, so it
+    // has to be able to tell.
+    use cicada_core::plan::parse_tag;
+    let v = parse_tag("v{version}", "v1.5.0-rc.2").unwrap();
+    assert_eq!(v.to_string(), "1.5.0-rc.2");
+    assert!(!v.pre.is_empty());
+    assert!(parse_tag("v{version}", "v1.5.0").unwrap().pre.is_empty());
+}
+
+#[test]
+fn something_that_is_not_this_packages_tag_is_rejected() {
+    use cicada_core::plan::parse_tag;
+    assert_eq!(parse_tag("v{version}", "nightly"), None);
+    assert_eq!(parse_tag("v{version}", "v1.5"), None);
+    assert_eq!(parse_tag("v{version}", "1.5.0"), None);
+    assert_eq!(parse_tag("v{version}", "vx.y.z"), None);
+}

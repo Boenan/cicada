@@ -14,7 +14,7 @@ use cicada_core::plan::{PlanError, PlanInput};
 use cicada::git::{GitBackend, GitCli};
 use cicada::report::Style;
 use cicada::forge::{self, Forge, PrRequest, flow};
-use cicada::{auth, config, git, history, prepare, report, versions};
+use cicada::{auth, config, git, history, phase_b, prepare, report, versions};
 
 /// Exit codes are a contract, not an implementation detail (#68). CI branches on
 /// them, so `3` (your commits are malformed) and `4` (cicada declined to act) are
@@ -105,6 +105,32 @@ enum Command {
         no_push: bool,
     },
 
+    /// Phase B — reconcile tags and release objects.
+    ///
+    /// Stateless: it asks whether the tag for each recorded version exists, and
+    /// whether a release object exists for it, and creates what is missing (#56).
+    Release {
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        no_push: bool,
+    },
+
+    /// Phase B then Phase A, in that order. What CI should call.
+    ///
+    /// **The order is the point** (#35). Both phases are triggered by the same
+    /// event, so getting it wrong is CI's to get wrong and is silent: if A ran
+    /// first it would compute its range from the *old* tag, re-include everything
+    /// the just-merged release contained, and propose releasing it again with
+    /// duplicate changelog entries, every cycle. This subcommand exists so a CI
+    /// file cannot express the broken order.
+    Run {
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        no_push: bool,
+    },
+
     /// Emit a built-in template, so customising starts from the real thing (#48).
     Template {
         #[command(subcommand)]
@@ -160,6 +186,8 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
         Command::Check { base, head } => cmd_check(cli, base.as_deref(), head),
         Command::Plan => cmd_plan(cli),
         Command::ReleasePr { dry_run, no_push } => cmd_release_pr(cli, *dry_run, *no_push),
+        Command::Release { dry_run, no_push } => cmd_release(cli, mode_of(*dry_run, *no_push)),
+        Command::Run { dry_run, no_push } => cmd_run(cli, mode_of(*dry_run, *no_push)),
         Command::Template { what } => match what {
             TemplateCmd::Print { name } => cmd_template_print(name),
         },
@@ -309,29 +337,38 @@ fn gather_config_findings(
     findings
 }
 
-/// Everything `plan` and `release-pr` both do before they diverge: discover the
-/// repo, load and validate the config, classify the branch, resolve anchors, and
-/// compute the plan.
+/// Everything every command does before the phases diverge: discover the repo,
+/// load and validate the config, classify the branch, read the versions file.
 ///
 /// Kept in one place because the *order* matters and is easy to get subtly wrong:
-/// shallow detection precedes any range (H8), config validation precedes any
-/// git work, and the prerelease refusal precedes planning rather than following it.
-struct Prepared {
+/// shallow detection precedes any range (H8), config validation precedes any git
+/// work, and the prerelease refusal precedes planning rather than following it.
+struct Context {
     repo: GitCli,
     loaded: config::Loaded,
     branch: String,
     on_release_branch: bool,
+    maintenance: bool,
     versions: versions::Loaded,
+}
+
+/// A context plus the plan. **Phase B deliberately does not have one**: anchor
+/// resolution hard-errors when the recorded version's tag does not exist yet
+/// (J1), which is precisely the state between a merge and the tag Phase B is
+/// about to create (C8). Computing a plan there would refuse to run the thing
+/// that fixes it.
+struct Prepared {
+    ctx: Context,
     plan: cicada_core::plan::Plan,
 }
 
-enum Prep {
-    Ready(Box<Prepared>),
+enum Prep<T> {
+    Ready(Box<T>),
     /// An exit code that is the whole answer — a refusal, or the branch gate.
     Exit(u8),
 }
 
-fn prepare_run(cli: &Cli) -> anyhow::Result<Prep> {
+fn prepare_context(cli: &Cli) -> anyhow::Result<Context> {
     let cwd = std::env::current_dir()?;
     let repo = GitCli::discover(&cwd)?;
 
@@ -356,14 +393,14 @@ fn prepare_run(cli: &Cli) -> anyhow::Result<Prep> {
         cicada_core::branch::matches_any(&cfg.settings.maintenance_branches, &branch_name)?;
 
     // The one deliberate gap left from M1. A prerelease branch would compute a
-    // *stable* version here, which is not a missing feature but a wrong answer —
-    // and a plan that lies offline defeats the point of it running offline
-    // (§Goals 6). Refusing is loud; computing would be quiet. Deleting this block
-    // is what lands prerelease support.
+    // *stable* version, which is not a missing feature but a wrong answer — and a
+    // plan that lies offline defeats the point of it running offline (§Goals 6).
+    // Refusing is loud; computing would be quiet. Deleting this block is what
+    // lands prerelease support.
     if cicada_core::branch::matches_any(&cfg.settings.prerelease_branches, &branch_name)? {
         anyhow::bail!(
-            "'{branch_name}' matches `prerelease_branches`, and prerelease planning is not \
-             implemented yet\ncicada would otherwise report a stable version here, which would be \
+            "'{branch_name}' matches `prerelease_branches`, and prerelease support is not \
+             implemented yet\ncicada would otherwise compute a stable version here, which would be \
              wrong rather than incomplete"
         );
     }
@@ -375,17 +412,24 @@ fn prepare_run(cli: &Cli) -> anyhow::Result<Prep> {
         "loaded versions file"
     );
 
-    let collected = history::collect(&repo, cfg, &versions.versions, "HEAD")?;
+    Ok(Context { repo, loaded, branch: branch_name, on_release_branch, maintenance, versions })
+}
+
+fn prepare_run(cli: &Cli) -> anyhow::Result<Prep<Prepared>> {
+    let ctx = prepare_context(cli)?;
+    let cfg = &ctx.loaded.config;
+
+    let collected = history::collect(&ctx.repo, cfg, &ctx.versions.versions, "HEAD")?;
     for (target, anchor) in &collected.anchors {
         tracing::debug!(?target, anchor = ?anchor, "resolved anchor");
     }
 
     let input = PlanInput {
         config: cfg,
-        versions: &versions.versions,
+        versions: &ctx.versions.versions,
         history: &collected.history,
-        maintenance,
-        branch: branch_name.clone(),
+        maintenance: ctx.maintenance,
+        branch: ctx.branch.clone(),
     };
     let plan = match cicada_core::plan::plan(&input) {
         Ok(p) => p,
@@ -404,14 +448,7 @@ fn prepare_run(cli: &Cli) -> anyhow::Result<Prep> {
         }
     };
 
-    Ok(Prep::Ready(Box::new(Prepared {
-        repo,
-        loaded,
-        branch: branch_name,
-        on_release_branch,
-        versions,
-        plan,
-    })))
+    Ok(Prep::Ready(Box::new(Prepared { ctx, plan })))
 }
 
 fn cmd_plan(cli: &Cli) -> anyhow::Result<u8> {
@@ -422,11 +459,11 @@ fn cmd_plan(cli: &Cli) -> anyhow::Result<u8> {
     let date = cli.date.unwrap_or_else(today_utc);
 
     if cli.json {
-        print!("{}", plan_json(&date, &p.branch, p.on_release_branch, &p.plan));
+        print!("{}", plan_json(&date, &p.ctx.branch, p.ctx.on_release_branch, &p.plan));
     } else if !cli.quiet {
         let style = Style::detect();
         print!("{}", report::render_plan(&style, &p.plan));
-        if !p.on_release_branch {
+        if !p.ctx.on_release_branch {
             // Not an error: `plan` is a question, and the answer is the same
             // wherever it is asked. But `run` here would exit 0 without acting
             // (#26, H1), and discovering that from a silent pipeline is worse
@@ -434,7 +471,7 @@ fn cmd_plan(cli: &Cli) -> anyhow::Result<u8> {
             eprintln!(
                 "\nnote: '{}' matches no `release_branches` pattern — `cicada run` would exit 0 \
                  here without releasing",
-                p.branch
+                p.ctx.branch
             );
         }
     }
@@ -460,23 +497,27 @@ impl Mode {
     }
 }
 
+fn mode_of(dry_run: bool, no_push: bool) -> Mode {
+    match (dry_run, no_push) {
+        (true, _) => Mode::DryRun,
+        (false, true) => Mode::NoPush,
+        (false, false) => Mode::Full,
+    }
+}
+
 /// Phase A — compute the release, write the files, open the pull request.
 ///
 /// The steps are the design's, in the design's order (§Phase A). Two of them are
 /// refusals, and both run in every mode: a rehearsal that reports success where
 /// the real run would refuse is a rehearsal that lies.
 fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8> {
-    let mode = match (dry_run, no_push) {
-        (true, _) => Mode::DryRun,
-        (false, true) => Mode::NoPush,
-        (false, false) => Mode::Full,
-    };
+    let mode = mode_of(dry_run, no_push);
 
     let p = match prepare_run(cli)? {
         Prep::Ready(p) => p,
         Prep::Exit(code) => return Ok(code),
     };
-    let cfg = &p.loaded.config;
+    let cfg = &p.ctx.loaded.config;
     let style = Style::detect();
 
     // 0. The gate (#26). This command writes, so a branch outside
@@ -488,37 +529,20 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
     //    to **stderr**: H1's assertion is that stdout stays empty (so `--json`
     //    consumers and pipelines are unaffected), not that cicada refuses to
     //    explain itself.
-    if !p.on_release_branch {
-        tracing::info!(branch = %p.branch, "not a release branch; nothing to do");
-        if !cli.quiet {
-            eprintln!(
-                "cicada: nothing to do — '{}' matches no `release_branches` pattern ({})\n\
-                 \n\
-                 cicada only writes on branches you have listed, so this is a no-op rather than\n\
-                 an error. To rehearse a release from here, either run `cicada plan`, which is\n\
-                 not gated, or add this branch to `release_branches` in {}.",
-                p.branch,
-                cfg.settings
-                    .release_branches
-                    .iter()
-                    .map(|b| format!("`{b}`"))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                p.loaded.path.display(),
-            );
-        }
+    if !p.ctx.on_release_branch {
+        gate_note(cli, &p.ctx);
         return Ok(exit::OK);
     }
 
     let head_branch =
-        cicada_core::branch::render_pr_branch(&cfg.settings.release_pr_branch, &p.branch);
+        cicada_core::branch::render_pr_branch(&cfg.settings.release_pr_branch, &p.ctx.branch);
 
     // The forge, and the credentials for it, only when a run will actually reach
     // one. `plan`, `--dry-run` and `--no-push` need no token (#25), and building
     // an adapter would demand one.
     let token = auth::resolve(cli.token.as_deref());
     let repo_slug = cfg.forge.repo.clone().or_else(|| {
-        p.repo.remote_url("origin").ok().flatten().as_deref().and_then(prepare::repo_from_remote)
+        p.ctx.repo.remote_url("origin").ok().flatten().as_deref().and_then(prepare::repo_from_remote)
     });
     let forge: Option<Box<dyn Forge>> = if mode.touches_the_forge() {
         let token = token.clone().ok_or(forge::ForgeError::NoToken)?;
@@ -550,7 +574,7 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
         return Ok(exit::OK);
     }
 
-    let root = p.repo.root();
+    let root = p.ctx.repo.root();
     let date = cli.date.unwrap_or_else(today_utc);
 
     // 5. Render the plan to edits.
@@ -569,7 +593,7 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
     let rendered = cicada_core::render::render(&cicada_core::render::RenderInput {
         config: cfg,
         plan: &p.plan,
-        versions: &p.versions.versions,
+        versions: &p.ctx.versions.versions,
         date: &date.to_string(),
         links: &links,
         sources: &sources,
@@ -596,7 +620,7 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
     //    exactly where it matters. Fetch first, then judge.
     let askpass = token.as_ref().map(auth::askpass_env).unwrap_or_default();
     let push_url = if mode.touches_the_forge() {
-        p.repo
+        p.ctx.repo
             .remote_url("origin")?
             .as_deref()
             .and_then(|u| auth::push_url(u, cfg.forge.kind))
@@ -605,7 +629,7 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
     };
 
     let remote_tip = match (&push_url, mode.touches_the_forge()) {
-        (Some(url), true) => p.repo.fetch_branch(url, &head_branch, &askpass)?,
+        (Some(url), true) => p.ctx.repo.fetch_branch(url, &head_branch, &askpass)?,
         _ => None,
     };
     let guard_tip = match mode.touches_the_forge() {
@@ -613,14 +637,14 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
         // Without a push there is no remote to consult and no token to consult it
         // with. The local branch is what a rehearsal can see, and it is what a
         // rehearsal would overwrite.
-        false => p.repo.branch_tip(&head_branch)?,
+        false => p.ctx.repo.branch_tip(&head_branch)?,
     };
 
     let identity = cicada_core::Identity::parse(&cfg.settings.committer)
         .map_err(|e| anyhow::anyhow!("settings.committer: {e}"))?;
 
     if let Some(tip) = &guard_tip
-        && p.repo.committer_of(tip)?.as_deref() != Some(identity.to_git().as_str())
+        && p.ctx.repo.committer_of(tip)?.as_deref() != Some(identity.to_git().as_str())
     {
         return refuse_stale(&p, forge.as_deref(), &head_branch, tip, &identity, cli.quiet);
     }
@@ -635,7 +659,7 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
 
     // 8. Reset the head branch to HEAD, apply the edits, commit.
     let message = commit_message(cfg, &p.plan);
-    let outcome = p.repo.commit_edits(&git::CommitRequest {
+    let outcome = p.ctx.repo.commit_edits(&git::CommitRequest {
         branch: &head_branch,
         base: "HEAD",
         edits: &rendered.edits,
@@ -668,12 +692,12 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
              equivalent\ntoken auth is HTTP Basic, so the push must be over HTTPS"
         )
     })?;
-    p.repo.push_branch(&url, &outcome.sha, &head_branch, remote_tip.as_deref(), &askpass)?;
+    p.ctx.repo.push_branch(&url, &outcome.sha, &head_branch, remote_tip.as_deref(), &askpass)?;
 
     let req = PrRequest {
         head: head_branch.clone(),
         // The base is the branch cicada ran on, never a fixed default (#27).
-        base: p.branch.clone(),
+        base: p.ctx.branch.clone(),
         title: cfg.settings.release_pr_title.clone(),
         body: pr_body(&p.plan, &rendered.notes),
     };
@@ -707,7 +731,7 @@ fn refuse_stale(
     identity: &cicada_core::Identity,
     quiet: bool,
 ) -> anyhow::Result<u8> {
-    let committer = p.repo.committer_of(tip)?.unwrap_or_default();
+    let committer = p.ctx.repo.committer_of(tip)?.unwrap_or_default();
     eprintln!(
         "error: `{head_branch}` has a commit cicada did not write, so cicada will not replace it\n\
          \n  tip       {}\n  committer {committer}\n  expected  {}\n\
@@ -716,15 +740,15 @@ fn refuse_stale(
          `{head_branch}` and run again.",
         short(tip),
         identity.to_git(),
-        p.branch,
-        p.branch,
+        p.ctx.branch,
+        p.ctx.branch,
     );
 
     if let Some(f) = forge {
         let body = format!(
             "cicada could not refresh this pull request.\n\n             `{head_branch}` carries a commit cicada did not write (`{}`, by {committer}), and              discarding it would lose work that exists nowhere else.\n\n             **This pull request is now a draft and must not be merged.** Merging it would ship              the commits that have landed since, with no changelog entry and no effect on the              version number.\n\n             To recover: move that change onto `{}` if it belongs there, then delete or reset              `{head_branch}`. The next run will regenerate this pull request.",
             short(tip),
-            p.branch,
+            p.ctx.branch,
         );
         if let Some(number) = flow::mark_stale(f, head_branch, &body)?
             && !quiet
@@ -762,6 +786,176 @@ fn pr_body(
     out
 }
 
+/// Say why a command that writes did nothing (#26).
+///
+/// Acting on a branch outside `release_branches` is not an error and must not
+/// fail a CI job — but *silently* doing nothing is indistinguishable from a
+/// broken tool, and that is what a human running the command by hand hits first.
+///
+/// It goes to **stderr**: H1's assertion is that stdout stays empty, so `--json`
+/// consumers and pipelines are unaffected, not that cicada refuses to explain
+/// itself.
+fn gate_note(cli: &Cli, ctx: &Context) {
+    tracing::info!(branch = %ctx.branch, "not a release branch; nothing to do");
+    if cli.quiet {
+        return;
+    }
+    eprintln!(
+        "cicada: nothing to do — '{}' matches no `release_branches` pattern ({})\n\
+         \n\
+         cicada only writes on branches you have listed, so this is a no-op rather than\n\
+         an error. To rehearse a release from here, either run `cicada plan`, which is\n\
+         not gated, or add this branch to `release_branches` in {}.",
+        ctx.branch,
+        ctx.loaded
+            .config
+            .settings
+            .release_branches
+            .iter()
+            .map(|b| format!("`{b}`"))
+            .collect::<Vec<_>>()
+            .join(", "),
+        ctx.loaded.path.display(),
+    );
+}
+
+/// The credentials and forge a run needs, when it needs them.
+///
+/// Built once and shared by both phases, because `cicada run` reaches the forge
+/// twice and resolving a token twice would let the two halves disagree.
+struct Wiring {
+    forge: Option<Box<dyn Forge>>,
+    push: Option<(String, Vec<(String, String)>)>,
+    links: cicada_core::notes::LinkStyle,
+}
+
+fn wire(cli: &Cli, ctx: &Context, mode: Mode) -> anyhow::Result<Wiring> {
+    let cfg = &ctx.loaded.config;
+    let token = auth::resolve(cli.token.as_deref());
+    let repo_slug = cfg.forge.repo.clone().or_else(|| {
+        ctx.repo.remote_url("origin").ok().flatten().as_deref().and_then(prepare::repo_from_remote)
+    });
+    let links = prepare::link_style(cfg, repo_slug.as_deref());
+
+    if !mode.touches_the_forge() {
+        return Ok(Wiring { forge: None, push: None, links });
+    }
+
+    let token = token.ok_or(forge::ForgeError::NoToken)?;
+    let slug = repo_slug.ok_or_else(|| {
+        anyhow::anyhow!(
+            "cicada cannot tell which repository to act on\n\
+             set `repo` under `[forge]` in cicada.toml, or give the repo an `origin` remote"
+        )
+    })?;
+    let url = ctx
+        .repo
+        .remote_url("origin")?
+        .as_deref()
+        .and_then(|u| auth::push_url(u, cfg.forge.kind))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "cicada cannot work out where to push: `origin` is missing, or its URL has no \
+                 HTTPS equivalent\ntoken auth is HTTP Basic, so the push must be over HTTPS"
+            )
+        })?;
+
+    Ok(Wiring {
+        forge: Some(forge::build(cfg, &slug, token.expose().to_string())?),
+        push: Some((url, auth::askpass_env(&token))),
+        links,
+    })
+}
+
+/// Phase B — `cicada release`.
+fn cmd_release(cli: &Cli, mode: Mode) -> anyhow::Result<u8> {
+    let ctx = prepare_context(cli)?;
+    if !ctx.on_release_branch {
+        gate_note(cli, &ctx);
+        return Ok(exit::OK);
+    }
+    run_phase_b(cli, &ctx, mode).map(|(code, _)| code)
+}
+
+/// `cicada run` — Phase B **then** Phase A (#35).
+fn cmd_run(cli: &Cli, mode: Mode) -> anyhow::Result<u8> {
+    let ctx = prepare_context(cli)?;
+    let (code, _) = run_phase_b(cli, &ctx, mode)?;
+    if code != exit::OK {
+        // A refused or failed Phase B must not be followed by a Phase A that
+        // plans against the state it refused to reconcile.
+        return Ok(code);
+    }
+    // Phase A re-reads everything from scratch: the tag Phase B just created is
+    // what makes its anchor resolve at all, which is the whole reason for the
+    // ordering.
+    cmd_release_pr(cli, mode == Mode::DryRun, mode == Mode::NoPush)
+}
+
+fn run_phase_b(cli: &Cli, ctx: &Context, mode: Mode) -> anyhow::Result<(u8, phase_b::Outcome)> {
+    let cfg = &ctx.loaded.config;
+    let style = Style::detect();
+
+    // The gate (#26), same as Phase A: cicada writes here too. Silent, because
+    // the caller explains it — `cicada run` would otherwise say it twice, once
+    // per phase.
+    if !ctx.on_release_branch {
+        return Ok((exit::OK, phase_b::Outcome::default()));
+    }
+
+    let wiring = wire(cli, ctx, mode)?;
+    let identity = cicada_core::Identity::parse(&cfg.settings.committer)
+        .map_err(|e| anyhow::anyhow!("settings.committer: {e}"))?;
+    let date = cli.date.unwrap_or_else(today_utc);
+    let overrides = prepare::overrides(ctx.repo.root());
+
+    if mode == Mode::DryRun {
+        // Phase B's whole job is creating things; with nothing to create there is
+        // no diff to show, so it reports what it *would* reconcile and stops.
+        let pending = phase_b::pending(&ctx.repo, cfg, &ctx.versions.versions)?;
+        if !cli.quiet {
+            print!("{}", report::render_phase_b_dry_run(&style, &pending));
+        }
+        return Ok((exit::OK, phase_b::Outcome::default()));
+    }
+
+    let push = wiring.push.as_ref().map(|(u, e)| (u.as_str(), e.as_slice()));
+    let outcome = match phase_b::run(
+        &ctx.repo,
+        &phase_b::PhaseBInput {
+            config: cfg,
+            versions: &ctx.versions.versions,
+            date: &date.to_string(),
+            links: &wiring.links,
+            identity: &identity,
+            overrides: &overrides,
+            push,
+            forge: wiring.forge.as_deref(),
+        },
+    ) {
+        Ok(o) => o,
+        // Both are refusals, not breakage (#68): cicada declined to act because
+        // acting would ship something wrong.
+        Err(e @ (phase_b::PhaseBError::Collision { .. } | phase_b::PhaseBError::StaleMerge { .. })) => {
+            eprintln!("error: {e}");
+            return Ok((exit::REFUSED, phase_b::Outcome::default()));
+        }
+        Err(e) => return Err(e.into()),
+    };
+
+    // The manifest goes to disk as well as into every release body (#42): under
+    // `--no-push` there is no release object at all, so the file is the only way
+    // to inspect a rehearsal.
+    if !outcome.manifest.releases.is_empty() {
+        prepare::write_manifest(ctx.repo.root(), &outcome.manifest)?;
+    }
+
+    if !cli.quiet {
+        print!("{}", report::render_phase_b(&style, &outcome));
+    }
+    Ok((exit::OK, outcome))
+}
+
 /// #80 — the version-collision check, run in Phase A as well as Phase B.
 ///
 /// A tag that exists but is **not reachable from HEAD** means it was cut on
@@ -771,10 +965,10 @@ fn pr_body(
 /// error before a human has read anything.
 fn collision_check(p: &Prepared) -> anyhow::Result<Option<u8>> {
     for r in &p.plan.releases {
-        if p.repo.rev_parse(&r.tag)?.is_none() {
+        if p.ctx.repo.rev_parse(&r.tag)?.is_none() {
             continue;
         }
-        if p.repo.is_ancestor(&r.tag, "HEAD")? {
+        if p.ctx.repo.is_ancestor(&r.tag, "HEAD")? {
             continue;
         }
         eprintln!(

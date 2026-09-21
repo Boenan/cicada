@@ -283,6 +283,28 @@ impl GitBackend for GitCli {
         Ok(CommitOutcome { sha, created: true })
     }
 
+    fn create_tag(
+        &self,
+        tag: &str,
+        sha: &str,
+        message: &str,
+        identity: &cicada_core::Identity,
+    ) -> Result<(), GitError> {
+        let env = [
+            ("GIT_COMMITTER_NAME", identity.name.clone()),
+            ("GIT_COMMITTER_EMAIL", identity.email.clone()),
+        ];
+        run_full(&self.root, &["tag", "-a", tag, "-m", message, sha], &env, None)?;
+        Ok(())
+    }
+
+    fn push_tag(&self, url: &str, tag: &str, env: &[(String, String)]) -> Result<(), GitError> {
+        let env: Vec<(&str, String)> = env.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+        let refspec = format!("refs/tags/{tag}:refs/tags/{tag}");
+        run_full(&self.root, &["push", "--quiet", url, &refspec], &env, None)?;
+        Ok(())
+    }
+
     fn fetch_branch(
         &self,
         url: &str,

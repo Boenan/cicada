@@ -192,6 +192,7 @@ adapters cheap instead of a rewrite.
 | 100 | The release commit is built with **git plumbing into a private index** — never by checking the release PR branch out. The working tree, the real index and the current branch are untouched. `--no-push` is the *local rehearsal* mode (§Goals 6), a failure between two checkouts would strand the run on the wrong branch, and two overlapping Phase A jobs in one workspace (D6) would corrupt each other's checkout |
 | 101 | #32's guard inspects the branch **that is about to be overwritten** — the *remote* head branch when cicada will push, not the local one. A fresh CI clone has no local `cicada/main`, so a guard reading `refs/heads/` sees nothing, finds no human commit, and force-pushes over one. cicada fetches the head branch into a private ref before judging, and pushes with `--force-with-lease` against exactly the sha it read |
 | 102 | GitHub drafting is a **GraphQL** operation, not a REST field. `draft: true` works when a pull request is created and nowhere else; `PATCH /pulls/{n}` has no such parameter. Staleness layer 2 drafts a PR that already exists, which is precisely the case REST cannot express — so `set_draft` takes the whole `PullRequest` (for its node id) rather than a number, and #54's title-prefix fallback stays reserved for forges where drafting is genuinely unavailable |
+| 103 | Monotonicity (#76) is checked **directly** in Phase B, not inferred from the staleness guard. J4b claims a downward hand-edit trips that guard "with no extra machinery"; it cannot, because #90 selects `prev` from tags *below* the recorded version — editing `1.4.2` down to `1.0.0` leaves no eligible `prev`, so the recomputation becomes a *first release* and `1.0.0` clears it. Phase B therefore refuses when a **reachable stable tag sits above** the recorded version. Reachability is what keeps parallel lines out of it (G6, G10) |
 
 ---
 
@@ -440,9 +441,23 @@ precisely the harm the staleness model exists to prevent: a `feat` shipped under
 
 **The comparison is deliberately one-sided.** Only *lower than expected* is an error. A recorded version
 *higher* than the recomputation is a deliberate over-bump — a human hand-editing the versions file to cut a
-release by hand — which is a supported workflow (J4). The same asymmetry enforces #76 for free: editing the
-versions file *downwards* puts the recorded version below the recomputed one and trips this guard without
-needing a separate check.
+release by hand — which is a supported workflow (J4).
+
+**It does not enforce #76 for free, though an earlier reading of this section claimed it did** (#103). The
+claim was that editing the versions file *downwards* puts the recorded version below the recomputed one and
+trips this guard. It does not, because `prev` is selected from tags *below the recorded version* (#90): edit
+`1.4.2` down to `1.0.0` and there is no eligible `prev` at all, so the recomputation is a **first release**,
+which `1.0.0` comfortably clears. The two rules cannot both hold.
+
+So monotonicity is its own check, sitting beside this one under the same #78 gate: **a reachable stable tag
+above the recorded version is a refusal.** Reachability is what keeps it off parallel lines — `release/1.4`
+records `1.4.8` while `main` has tagged `v2.0.0`, and that tag is not reachable from the maintenance branch,
+so it is not that line's business (G6, G10).
+
+**And the recomputation's base is `prev`, not the record.** `expected = plan(prev..HEAD)` means both the
+range *and* the arithmetic start from `prev`; anchoring the range at `prev` while basing the bump on the
+recorded version applies the bump twice, so an ordinary release recomputes one bump too high and the guard
+fires on every single run.
 
 **`prev` is stable-only** (#90). A prerelease tag can match `tag_format` and sort below the recorded version
 — `v1.5.0-rc.2` does both when the record says `1.5.0` — so an unqualified "highest tag" would anchor the
@@ -1629,7 +1644,7 @@ Two sequencing principles, both learned from the decisions above:
 | **M2** | Updaters (cargo, helm, generic path + marker, template), minijinja notes template with three contexts + filters + `template print`, changelog marker insert/create, versions-file write, `FileEdit` boundary. **done** | ✅ `release-pr --dry-run` prints exactly the diff it would write; duplicate-output and re-parse checks fire. 198 tests green |
 | **M3** | Git write path: release PR branch reset/commit, committer identity, `release_branches` allowlist, templated `release_pr_branch`, `--no-push` end to end. **done** | ✅ **`release-pr --no-push` produces a real local release commit**, inspectable with `git show`, with the working tree untouched (#100). The #32 staleness refusal and the #80 collision check both fire. 216 tests green |
 | **M4** | `Forge` trait (9 methods) + GitHub adapter, upsert by head branch, auth via `GIT_ASKPASS`, retries/error mapping, **staleness model** (committer guard, draft, comment, close on empty plan). **built, one half unverified** | Protocols asserted against a recording fake; fetch/push/lease against a real bare repo; askpass end to end. 251 tests green. **Not yet verified: real HTTP against github.com** — that needs a token and a repo, and is the remaining gate |
-| **M5** | Phase B: tag reconciliation (reachability + collision), **independent release-object reconciliation**, stale-merge detection, release manifest (disk + embedded), `cicada run` ordering | merge → tag → release; re-run is a no-op; a simulated failed release call self-heals on the next run; a maintenance branch releases independently of `main` |
+| **M5** | Phase B: tag reconciliation (reachability + collision), **independent release-object reconciliation**, stale-merge detection, release manifest (disk + embedded), `cicada run` ordering. **done** | ✅ merge → tag → release; re-run is a no-op; a tag with no release object self-heals; a maintenance branch releases independently of `main`. 275 tests green. Verified end to end locally with `--no-push`; the forge half still rests on the fake (see M4) |
 | **M6** | GitLab adapter (REST v4, draft-as-title-prefix, self-hosted `api_url`) | Same flow green on GitLab |
 | **M7** | Shipped CI templates (Actions composite action, GitLab `include:`), docs incl. the CI-trigger footgun and a worked `cicada.toml` per repo shape | Third party can adopt from the README alone |
 | **M8** | musl static binaries (x86_64, aarch64), multi-arch Docker with `git`, self-release | cicada v0.1.0 released by cicada |

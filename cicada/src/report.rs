@@ -246,3 +246,47 @@ pub fn summarise_edits(style: &Style, n: usize, written: bool) -> String {
     let verb = if written { "written" } else { "would be written" };
     format!("  {} file{} {verb}\n", n, plural(n))
 }
+
+// --- Phase B -------------------------------------------------------------
+
+pub fn render_phase_b(style: &Style, outcome: &crate::phase_b::Outcome) -> String {
+    let mut s = String::new();
+    for (pkg, tag) in &outcome.tagged {
+        s.push_str(&format!("  {} {tag}  {}\n", style.green("✓"), style.dim(&format!("tagged {pkg}"))));
+    }
+    for (pkg, tag) in &outcome.released {
+        s.push_str(&format!("  {} {tag}  {}\n", style.green("✓"), style.dim(&format!("released {pkg}"))));
+    }
+    if outcome.is_no_op() {
+        // A re-run that changes nothing is the expected outcome on most pushes,
+        // not a problem (C3).
+        let n = outcome.already_tagged.len();
+        s.push_str(&format!(
+            "  {}\n",
+            style.dim(&if n == 0 {
+                "nothing to reconcile".to_string()
+            } else {
+                format!("nothing to reconcile — {n} tag{} already in place", plural(n))
+            })
+        ));
+    }
+    s
+}
+
+pub fn render_phase_b_dry_run(style: &Style, pending: &[crate::phase_b::Pending]) -> String {
+    use crate::phase_b::TagState;
+    if pending.is_empty() {
+        return format!("  {}\n", style.dim("nothing to reconcile"));
+    }
+    let width = pending.iter().map(|p| p.tag.chars().count()).max().unwrap_or(0);
+    let mut s = String::new();
+    for p in pending {
+        let (mark, note) = match p.state {
+            TagState::Tagged => (style.dim("·"), style.dim("already tagged")),
+            TagState::WouldTag => (style.green("+"), style.dim("would be created")),
+            TagState::Collides => (style.red("✗"), style.red("exists elsewhere — would refuse")),
+        };
+        s.push_str(&format!("  {mark} {:width$}  {note}\n", p.tag, width = width));
+    }
+    s
+}

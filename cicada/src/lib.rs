@@ -12,6 +12,7 @@ pub mod config;
 pub mod forge;
 pub mod git;
 pub mod history;
+pub mod phase_b;
 pub mod prepare;
 pub mod report;
 pub mod versions;

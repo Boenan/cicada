@@ -175,6 +175,28 @@ pub fn repo_from_remote(url: &str) -> Option<String> {
     if path.contains('/') { Some(path.to_string()) } else { None }
 }
 
+/// Where the release manifest lands on disk (#42). Gitignored, **never
+/// committed** — it describes a run, not a state of the repository.
+pub const MANIFEST_PATH: &str = "target/cicada/release-manifest.json";
+
+/// Write the manifest beside the build output.
+///
+/// On disk *as well as* embedded in every release body, for two reasons: under
+/// `--no-push` there is no release object at all, so the file is the only way to
+/// inspect a rehearsal (§Goals 6); and the deploy job that runs after the release
+/// job can read a file in the workspace without a token and an API round trip.
+pub fn write_manifest(
+    root: &Path,
+    manifest: &cicada_core::manifest::Manifest,
+) -> std::io::Result<PathBuf> {
+    let path = root.join(MANIFEST_PATH);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(&path, manifest.to_json())?;
+    Ok(path)
+}
+
 /// Write the edits. The **only** thing that distinguishes a dry run from a real
 /// one (#30).
 pub fn apply(root: &Path, edits: &[FileEdit]) -> std::io::Result<()> {

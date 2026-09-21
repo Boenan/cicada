@@ -99,6 +99,21 @@ impl FakeForge {
         self
     }
 
+    /// Seed a release object without recording a call.
+    ///
+    /// For the re-run assertions (C3, C4): the state a *previous* run left behind
+    /// is not a call this run made, and counting it as one would make "zero
+    /// mutating calls" impossible to assert.
+    pub fn create_release_for(&self, tag: &str) {
+        let mut s = self.state.borrow_mut();
+        let id = s.next_number;
+        s.next_number += 1;
+        s.releases.insert(
+            tag.to_string(),
+            Release { id, url: format!("https://forge.invalid/releases/{id}"), tag: tag.to_string() },
+        );
+    }
+
     pub fn calls(&self) -> Vec<Call> {
         self.state.borrow().calls.clone()
     }

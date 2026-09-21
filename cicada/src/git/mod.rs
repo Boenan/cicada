@@ -136,6 +136,27 @@ pub trait GitBackend {
     /// [`CommitRequest`] for why that matters more than it looks.
     fn commit_edits(&self, req: &CommitRequest<'_>) -> Result<CommitOutcome, GitError>;
 
+    /// Create an **annotated** tag at `sha`, tagged by `identity`.
+    ///
+    /// Annotated rather than lightweight: the tag is the anchor (#2) and the
+    /// thing a release object hangs off, so it is worth carrying who made it and
+    /// when. `rev_parse` peels `^{commit}`, so nothing downstream can tell the
+    /// difference.
+    ///
+    /// Does not touch the working tree or the index.
+    fn create_tag(
+        &self,
+        tag: &str,
+        sha: &str,
+        message: &str,
+        identity: &cicada_core::Identity,
+    ) -> Result<(), GitError>;
+
+    /// Push one tag. **Never forced**: a tag that already exists on the remote at
+    /// a different commit is a version collision (#9), and quietly overwriting it
+    /// would replace a published release's contents.
+    fn push_tag(&self, url: &str, tag: &str, env: &[(String, String)]) -> Result<(), GitError>;
+
     /// Fetch one branch from `url` and return the sha it points at there, or
     /// `None` when the remote does not have it.
     ///
