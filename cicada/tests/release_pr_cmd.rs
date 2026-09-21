@@ -362,10 +362,13 @@ fn template_print_names_the_alternatives_when_asked_for_one_that_does_not_exist(
     assert!(stderr(&out).contains("notes"), "{}", stderr(&out));
 }
 
-// --- the push and the pull request are not here yet ----------------------
+// --- a full run needs credentials, and says so before doing anything -----
 
 #[test]
-fn a_full_run_says_what_is_missing_rather_than_half_doing_it() {
+fn a_full_run_with_no_token_says_so_and_writes_nothing() {
+    // `plan`, `check`, `--dry-run` and `--no-push` need no token (#25); opening a
+    // pull request does. The check lands before any work, so a forgotten token
+    // costs an error rather than a half-finished release.
     let f = Fixture::new("m4", SHAPE_1);
     f.write("Cargo.toml", CARGO);
     f.git(&["add", "-A"]);
@@ -374,11 +377,10 @@ fn a_full_run_says_what_is_missing_rather_than_half_doing_it() {
 
     let out = f.cicada(&["release-pr"]);
     assert_eq!(code(&out), 1);
-    assert!(stderr(&out).contains("M4"), "{}", stderr(&out));
-    // It names the branch `--no-push` would write, so the way forward is in the
-    // message rather than in the docs.
-    assert!(stderr(&out).contains("cicada/main"), "{}", stderr(&out));
-    // And it created nothing on the way to saying so.
+    let e = stderr(&out);
+    assert!(e.contains("CICADA_TOKEN"), "{e}");
+    assert!(e.contains("--no-push"), "it names what does work without one: {e}");
+    // Nothing was created on the way to saying so.
     assert!(f.branch_tip("cicada/main").is_none());
 }
 

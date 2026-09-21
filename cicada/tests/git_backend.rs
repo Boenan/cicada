@@ -378,3 +378,121 @@ fn a_base_that_does_not_resolve_is_an_error_rather_than_an_empty_commit() {
     assert!(err.to_string().contains("does not resolve"), "{err}");
     assert_eq!(git.branch_tip("cicada/main").unwrap(), None);
 }
+
+// --- fetch and push (M4) -------------------------------------------------
+
+/// A bare repo standing in for the forge. `push_branch` and `fetch_branch` take a
+/// URL rather than a remote name precisely so the transport is the caller's
+/// choice — which is what makes them testable without a network.
+fn bare(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("cicada-bare-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = Command::new("git").args(["init", "--bare", "-q"]).current_dir(&dir).output().unwrap();
+    assert!(out.status.success());
+    dir
+}
+
+#[test]
+fn a_branch_the_remote_does_not_have_is_an_answer_not_an_error() {
+    // The ordinary state before cicada has ever run on a line.
+    let r = TempRepo::new("fetch-absent");
+    r.commit("chore: init");
+    let remote = bare("fetch-absent");
+    let git = GitCli::discover(&r.dir).unwrap();
+
+    let got = git.fetch_branch(&remote.to_string_lossy(), "cicada/main", &[]).unwrap();
+    assert_eq!(got, None);
+}
+
+#[test]
+fn fetch_branch_sees_what_the_remote_has_even_with_no_local_branch() {
+    // This is the hole the M3 guard had: in CI the local `cicada/main` does not
+    // exist, so a guard consulting only `refs/heads/` sees nothing and
+    // force-pushes over whatever a human put on the remote.
+    let r = TempRepo::new("fetch-present");
+    r.commit("chore: init");
+    let remote = bare("fetch-present");
+    let url = remote.to_string_lossy().to_string();
+    let git = GitCli::discover(&r.dir).unwrap();
+
+    let out = commit_one(&git, "HEAD", &[edit("VERSION", "1.5.0\n")]).unwrap();
+    git.push_branch(&url, &out.sha, "cicada/main", None, &[]).unwrap();
+
+    // Delete the local branch, the way a fresh clone would never have had one.
+    r.git(&["branch", "-D", "cicada/main"]);
+    assert_eq!(git.branch_tip("cicada/main").unwrap(), None, "no local branch, as in CI");
+
+    // The remote still has it, and that is the branch a push would clobber.
+    assert_eq!(git.fetch_branch(&url, "cicada/main", &[]).unwrap().as_deref(), Some(out.sha.as_str()));
+    assert_eq!(git.committer_of(&out.sha).unwrap().as_deref(), Some(bot().to_git().as_str()));
+}
+
+#[test]
+fn fetching_does_not_disturb_the_workspaces_own_remote_tracking_refs() {
+    // cicada is handed someone else's checkout; rewriting `refs/remotes/origin/*`
+    // as a side effect of a release would be a durable surprise.
+    let r = TempRepo::new("fetch-clean");
+    r.commit("chore: init");
+    let remote = bare("fetch-clean");
+    let url = remote.to_string_lossy().to_string();
+    let git = GitCli::discover(&r.dir).unwrap();
+    let out = commit_one(&git, "HEAD", &[edit("VERSION", "1.5.0\n")]).unwrap();
+    git.push_branch(&url, &out.sha, "cicada/main", None, &[]).unwrap();
+
+    let before = r.git(&["for-each-ref", "--format=%(refname)", "refs/remotes"]);
+    git.fetch_branch(&url, "cicada/main", &[]).unwrap();
+    assert_eq!(r.git(&["for-each-ref", "--format=%(refname)", "refs/remotes"]), before);
+}
+
+#[test]
+fn push_replaces_the_remote_branch_rather_than_advancing_it() {
+    // #27/D1 — the branch is replaced, never updated, so the push is a force.
+    let r = TempRepo::new("push-replace");
+    r.commit("chore: init");
+    let remote = bare("push-replace");
+    let url = remote.to_string_lossy().to_string();
+    let git = GitCli::discover(&r.dir).unwrap();
+
+    let first = commit_one(&git, "HEAD", &[edit("VERSION", "1.5.0\n")]).unwrap();
+    git.push_branch(&url, &first.sha, "cicada/main", None, &[]).unwrap();
+
+    // A new base, so the second release commit is not a descendant of the first.
+    r.commit("feat: more");
+    let second = commit_one(&git, "HEAD", &[edit("VERSION", "1.6.0\n")]).unwrap();
+    assert_ne!(second.sha, first.sha);
+    git.push_branch(&url, &second.sha, "cicada/main", Some(&first.sha), &[]).unwrap();
+
+    assert_eq!(git.fetch_branch(&url, "cicada/main", &[]).unwrap().as_deref(), Some(second.sha.as_str()));
+}
+
+#[test]
+fn the_lease_refuses_when_the_remote_moved_after_it_was_read() {
+    // The window cicada's own guard cannot see: a second Phase A run, or a human,
+    // landing on the branch between the fetch and the push (D6). `--force` would
+    // silently win that race; `--force-with-lease` loses it loudly.
+    let r = TempRepo::new("push-lease");
+    r.commit("chore: init");
+    let remote = bare("push-lease");
+    let url = remote.to_string_lossy().to_string();
+    let git = GitCli::discover(&r.dir).unwrap();
+
+    let first = commit_one(&git, "HEAD", &[edit("VERSION", "1.5.0\n")]).unwrap();
+    git.push_branch(&url, &first.sha, "cicada/main", None, &[]).unwrap();
+
+    // Someone else moves the remote branch on.
+    r.commit("feat: theirs");
+    let theirs = commit_one(&git, "HEAD", &[edit("VERSION", "9.9.9\n")]).unwrap();
+    git.push_branch(&url, &theirs.sha, "cicada/main", Some(&first.sha), &[]).unwrap();
+
+    // Our push still believes the remote is at `first`.
+    r.commit("feat: ours");
+    let ours = commit_one(&git, "HEAD", &[edit("VERSION", "1.6.0\n")]).unwrap();
+    let err = git.push_branch(&url, &ours.sha, "cicada/main", Some(&first.sha), &[]).unwrap_err();
+
+    assert!(matches!(err, cicada::git::GitError::LeaseLost { .. }), "{err}");
+    // Self-correcting, and the message says so rather than leaving a reader to
+    // guess whether anything was lost.
+    assert!(err.to_string().contains("nothing was lost"), "{err}");
+    assert_eq!(git.fetch_branch(&url, "cicada/main", &[]).unwrap().as_deref(), Some(theirs.sha.as_str()));
+}

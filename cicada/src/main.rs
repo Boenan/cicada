@@ -13,7 +13,8 @@ use cicada_core::check::{Finding, Severity, lint_commits, validate_config, valid
 use cicada_core::plan::{PlanError, PlanInput};
 use cicada::git::{GitBackend, GitCli};
 use cicada::report::Style;
-use cicada::{config, git, history, prepare, report, versions};
+use cicada::forge::{self, Forge, PrRequest, flow};
+use cicada::{auth, config, git, history, prepare, report, versions};
 
 /// Exit codes are a contract, not an implementation detail (#68). CI branches on
 /// them, so `3` (your commits are malformed) and `4` (cicada declined to act) are
@@ -43,6 +44,13 @@ struct Cli {
     /// that follows it produce identical bytes rather than identical-looking ones.
     #[arg(long, global = true, value_name = "YYYY-MM-DD")]
     date: Option<jiff::civil::Date>,
+
+    /// Forge API token. Also read from `CICADA_TOKEN`.
+    ///
+    /// Never persisted, never written to `.git/config`, and never placed in
+    /// `argv` for the git subprocess — it reaches git through `GIT_ASKPASS` (#18).
+    #[arg(long, global = true, value_name = "TOKEN", env = "CICADA_TOKEN", hide_env_values = true)]
+    token: Option<String>,
 
     /// Machine-readable output.
     #[arg(long, global = true)]
@@ -114,6 +122,12 @@ enum Command {
 }
 
 fn main() -> ExitCode {
+    // Before argument parsing: when git spawns cicada to answer a credential
+    // prompt it passes the prompt text as `argv[1]`, which clap would reject.
+    if let Some(code) = auth::askpass_short_circuit() {
+        return code;
+    }
+
     let cli = Cli::parse();
     init_tracing(cli.verbose);
 
@@ -429,12 +443,35 @@ fn cmd_plan(cli: &Cli) -> anyhow::Result<u8> {
     Ok(exit::OK)
 }
 
-/// Phase A — compute the release, write the files onto the release PR branch.
+/// How far a `release-pr` run goes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// Compute and print; touch nothing (#25).
+    DryRun,
+    /// Write a real release commit on a real local branch; push nothing.
+    NoPush,
+    /// Push the branch and upsert the pull request.
+    Full,
+}
+
+impl Mode {
+    fn touches_the_forge(self) -> bool {
+        self == Mode::Full
+    }
+}
+
+/// Phase A — compute the release, write the files, open the pull request.
 ///
 /// The steps are the design's, in the design's order (§Phase A). Two of them are
-/// refusals, and both run under `--dry-run` as well: a rehearsal that reports
-/// success where the real run would refuse is a rehearsal that lies.
+/// refusals, and both run in every mode: a rehearsal that reports success where
+/// the real run would refuse is a rehearsal that lies.
 fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8> {
+    let mode = match (dry_run, no_push) {
+        (true, _) => Mode::DryRun,
+        (false, true) => Mode::NoPush,
+        (false, false) => Mode::Full,
+    };
+
     let p = match prepare_run(cli)? {
         Prep::Ready(p) => p,
         Prep::Exit(code) => return Ok(code),
@@ -473,22 +510,44 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
         return Ok(exit::OK);
     }
 
-    // 4. An empty plan is a normal outcome (#68). Closing an open release PR
-    //    (#34) needs the forge and lands in M4.
+    let head_branch =
+        cicada_core::branch::render_pr_branch(&cfg.settings.release_pr_branch, &p.branch);
+
+    // The forge, and the credentials for it, only when a run will actually reach
+    // one. `plan`, `--dry-run` and `--no-push` need no token (#25), and building
+    // an adapter would demand one.
+    let token = auth::resolve(cli.token.as_deref());
+    let repo_slug = cfg.forge.repo.clone().or_else(|| {
+        p.repo.remote_url("origin").ok().flatten().as_deref().and_then(prepare::repo_from_remote)
+    });
+    let forge: Option<Box<dyn Forge>> = if mode.touches_the_forge() {
+        let token = token.clone().ok_or(forge::ForgeError::NoToken)?;
+        let slug = repo_slug.clone().ok_or_else(|| {
+            anyhow::anyhow!(
+                "cicada cannot tell which repository to open a pull request against\n\
+                 set `repo` under `[forge]` in cicada.toml, or give the repo an `origin` remote"
+            )
+        })?;
+        Some(forge::build(cfg, &slug, token.expose().to_string())?)
+    } else {
+        None
+    };
+
+    // 4. An empty plan closes any open release PR (#34) — leaving it open
+    //    advertises a release that is no longer justified. On a quiet repo this
+    //    is the most-executed path in the tool (D5a), so it makes exactly one
+    //    read call and no mutating call unless there is something to close.
     if p.plan.is_empty() {
+        if let Some(f) = &forge
+            && let Some(number) = flow::close_open_pr(f.as_ref(), &head_branch)?
+            && !cli.quiet
+        {
+            println!("  {} closed #{number} — nothing left to release", style.dim("·"));
+        }
         if !cli.quiet {
             print!("{}", report::summarise_edits(&style, 0, false));
         }
         return Ok(exit::OK);
-    }
-
-    if !dry_run && !no_push {
-        anyhow::bail!(
-            "pushing and opening the pull request land in M4\n\
-             `--no-push` does everything up to that: it writes a real release commit on \
-             `{}`, which `git show` will display",
-            cicada_core::branch::render_pr_branch(&cfg.settings.release_pr_branch, &p.branch)
-        );
     }
 
     let root = p.repo.root();
@@ -499,9 +558,6 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
     // `forge.repo` when stated, otherwise derived from `origin`. Deriving is fine
     // here and nowhere near `forge.kind` (#66): a wrong link costs a 404 in a
     // changelog, a wrong forge costs a release.
-    let repo_slug = cfg.forge.repo.clone().or_else(|| {
-        p.repo.remote_url("origin").ok().flatten().as_deref().and_then(prepare::repo_from_remote)
-    });
     let links = prepare::link_style(cfg, repo_slug.as_deref());
 
     // Resolved first: `sources` must read the redirect targets as well as the
@@ -533,15 +589,43 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
     }
 
     // 7. Do not clobber a branch cicada did not write (#32).
-    let head_branch =
-        cicada_core::branch::render_pr_branch(&cfg.settings.release_pr_branch, &p.branch);
+    //
+    //    The branch at risk is the one about to be overwritten. When cicada is
+    //    going to push, that is the **remote** branch — and in CI the local one
+    //    does not exist at all, so consulting it would make this guard inert
+    //    exactly where it matters. Fetch first, then judge.
+    let askpass = token.as_ref().map(auth::askpass_env).unwrap_or_default();
+    let push_url = if mode.touches_the_forge() {
+        p.repo
+            .remote_url("origin")?
+            .as_deref()
+            .and_then(|u| auth::push_url(u, cfg.forge.kind))
+    } else {
+        None
+    };
+
+    let remote_tip = match (&push_url, mode.touches_the_forge()) {
+        (Some(url), true) => p.repo.fetch_branch(url, &head_branch, &askpass)?,
+        _ => None,
+    };
+    let guard_tip = match mode.touches_the_forge() {
+        true => remote_tip.clone(),
+        // Without a push there is no remote to consult and no token to consult it
+        // with. The local branch is what a rehearsal can see, and it is what a
+        // rehearsal would overwrite.
+        false => p.repo.branch_tip(&head_branch)?,
+    };
+
     let identity = cicada_core::Identity::parse(&cfg.settings.committer)
         .map_err(|e| anyhow::anyhow!("settings.committer: {e}"))?;
-    if let Some(code) = staleness_guard(&p, &head_branch, &identity)? {
-        return Ok(code);
+
+    if let Some(tip) = &guard_tip
+        && p.repo.committer_of(tip)?.as_deref() != Some(identity.to_git().as_str())
+    {
+        return refuse_stale(&p, forge.as_deref(), &head_branch, tip, &identity, cli.quiet);
     }
 
-    if dry_run {
+    if mode == Mode::DryRun {
         if !cli.quiet {
             print!("{}", report::render_diff(&style, &rendered.edits, &sources));
             print!("{}", report::summarise_edits(&style, rendered.edits.len(), false));
@@ -565,13 +649,117 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
             "  {} {}  {}",
             style.green("✓"),
             head_branch,
-            style.dim(&format!("{verb} {}", &outcome.sha[..outcome.sha.len().min(9)]))
+            style.dim(&format!("{verb} {}", short(&outcome.sha)))
         );
         print!("{}", report::summarise_edits(&style, rendered.edits.len(), true));
-        println!("  {}", style.dim(&format!("inspect it with `git show {head_branch}`")));
     }
 
+    let Some(f) = forge else {
+        if !cli.quiet {
+            println!("  {}", style.dim(&format!("inspect it with `git show {head_branch}`")));
+        }
+        return Ok(exit::OK);
+    };
+
+    // 9. Push, then upsert the pull request.
+    let url = push_url.ok_or_else(|| {
+        anyhow::anyhow!(
+            "cicada cannot work out where to push: `origin` is missing, or its URL has no HTTPS \
+             equivalent\ntoken auth is HTTP Basic, so the push must be over HTTPS"
+        )
+    })?;
+    p.repo.push_branch(&url, &outcome.sha, &head_branch, remote_tip.as_deref(), &askpass)?;
+
+    let req = PrRequest {
+        head: head_branch.clone(),
+        // The base is the branch cicada ran on, never a fixed default (#27).
+        base: p.branch.clone(),
+        title: cfg.settings.release_pr_title.clone(),
+        body: pr_body(&p.plan, &rendered.notes),
+    };
+
+    let (pr, created) = flow::upsert(f.as_ref(), &req)?;
+
+    if !cli.quiet {
+        let verb = if created { "opened" } else { "updated" };
+        println!("  {} {verb} {}", style.green("✓"), pr.url);
+    }
     Ok(exit::OK)
+}
+
+fn short(sha: &str) -> &str {
+    &sha[..sha.len().min(9)]
+}
+
+/// #32 / #33 layer 2 — refuse, and make the resulting pull request unmergeable.
+///
+/// Refusing alone is not enough. A stale release PR that gets merged ships the
+/// intervening commits with **no changelog entry and no influence on the version
+/// number**: the code ships, the semver contract breaks silently, and a `feat`
+/// goes out under a patch bump where nobody sees it. Draft state is what the
+/// forge itself enforces, which is why it is the layer that does not depend on
+/// repo configuration.
+fn refuse_stale(
+    p: &Prepared,
+    forge: Option<&dyn Forge>,
+    head_branch: &str,
+    tip: &str,
+    identity: &cicada_core::Identity,
+    quiet: bool,
+) -> anyhow::Result<u8> {
+    let committer = p.repo.committer_of(tip)?.unwrap_or_default();
+    eprintln!(
+        "error: `{head_branch}` has a commit cicada did not write, so cicada will not replace it\n\
+         \n  tip       {}\n  committer {committer}\n  expected  {}\n\
+         \nThat commit exists nowhere else — it is not derivable from `{}`, so discarding it would\n\
+         lose it. Move the change onto `{}` if it belongs there, then delete or reset\n\
+         `{head_branch}` and run again.",
+        short(tip),
+        identity.to_git(),
+        p.branch,
+        p.branch,
+    );
+
+    if let Some(f) = forge {
+        let body = format!(
+            "cicada could not refresh this pull request.\n\n             `{head_branch}` carries a commit cicada did not write (`{}`, by {committer}), and              discarding it would lose work that exists nowhere else.\n\n             **This pull request is now a draft and must not be merged.** Merging it would ship              the commits that have landed since, with no changelog entry and no effect on the              version number.\n\n             To recover: move that change onto `{}` if it belongs there, then delete or reset              `{head_branch}`. The next run will regenerate this pull request.",
+            short(tip),
+            p.branch,
+        );
+        if let Some(number) = flow::mark_stale(f, head_branch, &body)?
+            && !quiet
+        {
+            eprintln!(
+                "\n#{number} has been drafted and labelled `{}`, so it cannot be merged.",
+                cicada::forge::STALE_LABEL
+            );
+        }
+    }
+    Ok(exit::REFUSED)
+}
+
+/// The pull request body (D7).
+///
+/// **The same notes the changelog entries carry** (#43) — reused verbatim from
+/// the render rather than produced by a second template, because two templates
+/// drift apart within a month. With more than one release the entries are grouped
+/// by package, the way the umbrella changelog groups them (#15).
+fn pr_body(
+    plan: &cicada_core::plan::Plan,
+    notes: &std::collections::BTreeMap<cicada_core::Target, String>,
+) -> String {
+    if plan.releases.len() == 1 {
+        let r = &plan.releases[0];
+        let body = notes.get(&r.target).cloned().unwrap_or_default();
+        return format!("## {} {}\n\n{body}\n", r.name, r.to);
+    }
+    let mut out = String::new();
+    for r in &plan.releases {
+        out.push_str(&format!("## {} {}\n\n", r.name, r.to));
+        out.push_str(notes.get(&r.target).map(String::as_str).unwrap_or_default());
+        out.push_str("\n\n");
+    }
+    out
 }
 
 /// #80 — the version-collision check, run in Phase A as well as Phase B.
@@ -599,39 +787,6 @@ fn collision_check(p: &Prepared) -> anyhow::Result<Option<u8>> {
         return Ok(Some(exit::REFUSED));
     }
     Ok(None)
-}
-
-/// #32 — cicada replaces the release PR branch each run, and refuses to clobber
-/// a commit it did not write.
-///
-/// A human commit on that branch is the one thing on it that is *not* derivable
-/// from the base branch, so "throw it away and recompute" would destroy
-/// information that exists nowhere else.
-fn staleness_guard(
-    p: &Prepared,
-    head_branch: &str,
-    identity: &cicada_core::Identity,
-) -> anyhow::Result<Option<u8>> {
-    let Some(tip) = p.repo.branch_tip(head_branch)? else { return Ok(None) };
-    let committer = p.repo.committer_of(&tip)?.unwrap_or_default();
-    if committer == identity.to_git() {
-        return Ok(None);
-    }
-    eprintln!(
-        "error: `{head_branch}` has a commit cicada did not write, so cicada will not replace it\n\
-         \n  tip       {}\n  committer {committer}\n  expected  {}\n\
-         \nThat commit exists nowhere else — it is not derivable from `{}`, so discarding it would\n\
-         lose it. Move the change onto `{}` if it belongs there, then delete or reset\n\
-         `{head_branch}` and run again.",
-        &tip[..tip.len().min(9)],
-        identity.to_git(),
-        p.branch,
-        p.branch,
-    );
-    // Drafting the PR, labelling it `cicada:stale` and commenting (#33 layer 2)
-    // need the forge and land in M4. The refusal itself — the part that stops a
-    // wrong release — is here.
-    Ok(Some(exit::REFUSED))
 }
 
 /// The release commit's message.

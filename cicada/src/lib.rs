@@ -7,7 +7,9 @@
 //! It is a library as well as a binary so integration tests can drive the real
 //! `GitBackend` against real repositories rather than a mock.
 
+pub mod auth;
 pub mod config;
+pub mod forge;
 pub mod git;
 pub mod history;
 pub mod prepare;

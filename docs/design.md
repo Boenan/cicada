@@ -190,6 +190,8 @@ adapters cheap instead of a rewrite.
 | 98 | An unknown scope is fatal **only on a commit that can release** (#11). A type whose section is `bump = "none"` has no attribution to get wrong, and `chore(deps): bump serde` — the design's own canonical non-releasable example (#36) — names no package on any repo. `check` reports it as a **warning**, so it stays visible without blocking a release |
 | 99 | Updater edits **fold** rather than collide. Two surgical updaters may write one file — a `values.yaml` holding both `image.tag` and `labels.version` is ordinary — so each transforms the content the run has so far, in config order (#31), and one `FileEdit` per path comes out. #44's hard error is narrowed to what genuinely cannot fold: a **whole-file** writer (`template`) sharing a path with anything |
 | 100 | The release commit is built with **git plumbing into a private index** — never by checking the release PR branch out. The working tree, the real index and the current branch are untouched. `--no-push` is the *local rehearsal* mode (§Goals 6), a failure between two checkouts would strand the run on the wrong branch, and two overlapping Phase A jobs in one workspace (D6) would corrupt each other's checkout |
+| 101 | #32's guard inspects the branch **that is about to be overwritten** — the *remote* head branch when cicada will push, not the local one. A fresh CI clone has no local `cicada/main`, so a guard reading `refs/heads/` sees nothing, finds no human commit, and force-pushes over one. cicada fetches the head branch into a private ref before judging, and pushes with `--force-with-lease` against exactly the sha it read |
+| 102 | GitHub drafting is a **GraphQL** operation, not a REST field. `draft: true` works when a pull request is created and nowhere else; `PATCH /pulls/{n}` has no such parameter. Staleness layer 2 drafts a PR that already exists, which is precisely the case REST cannot express — so `set_draft` takes the whole `PullRequest` (for its node id) rather than a number, and #54's title-prefix fallback stays reserved for forges where drafting is genuinely unavailable |
 
 ---
 
@@ -1348,13 +1350,17 @@ trait Forge {
     fn create_pull_request(&self, req: PrReq)        -> Result<PullRequest>;
     fn update_pull_request(&self, id: u64, r: PrReq) -> Result<PullRequest>;
     fn close_pull_request(&self, id: u64)            -> Result<()>;   // #34, empty plan
-    fn set_draft(&self, id: u64, draft: bool)        -> Result<()>;   // #33, staleness layer 2
+    fn set_draft(&self, pr: &PullRequest, on: bool)  -> Result<()>;   // #33, layer 2 — see #102
     fn comment(&self, id: u64, body: &str)           -> Result<()>;   // #33, staleness layer 2
     fn set_labels(&self, id: u64, labels: &[String]) -> Result<()>;
     fn find_release(&self, tag: &str)                -> Result<Option<Release>>;
     fn create_release(&self, req: ReleaseReq)        -> Result<Release>;
 }
 ```
+
+`set_draft` takes the whole pull request rather than its number, which is the one place the GitHub API's
+shape reaches into the trait: drafting is a GraphQL mutation addressed by node id (#102), and a number is not
+enough to name the thing being changed.
 
 **Nine methods** (#53) — the staleness model (#32–34) needs drafting, commenting, and closing, which the
 original three-method sketch predated. Still a thin edge: everything else is git. Adapters: `github`
@@ -1378,7 +1384,11 @@ The same applies to `repo`: derivable from `origin`, but explicit in config. Git
 
 Staleness layer 2 depends on drafting, and the two forges implement it completely differently:
 
-- **GitHub** — a real API field (`draft: true`). Historically unavailable on private repos below certain plans.
+- **GitHub** — a real API field (`draft: true`), but **only at creation** (#102). `PATCH
+  /repos/{o}/{r}/pulls/{n}` accepts `title`, `body`, `state`, `base` and `maintainer_can_modify`, and nothing
+  else. Converting an *existing* PR to draft is the GraphQL mutation `convertPullRequestToDraft`, and coming
+  back is `markPullRequestReadyForReview`. Layer 2 drafts a PR that already exists, so it is always the
+  GraphQL path. Historically unavailable on private repos below certain plans.
 - **GitLab** — there is no flag at all. Draft state *is* a `Draft:` prefix on the MR title, so the adapter
   prefixes and strips a string.
 
@@ -1618,7 +1628,7 @@ Two sequencing principles, both learned from the decisions above:
 | **M1** | Anchor resolution (per-package ranges, tag reachability), scope routing incl. `default_scope`, bump computation (section `bump`, first-release table, `pre_major`, `maintenance` guard), umbrella aggregation, `Plan`. **done** | ✅ `cicada plan --json` correct on a fixture **monorepo and a single-package repo through the same code path**, fully offline. 111 tests green. One gap: a branch matching `prerelease_branches` refuses rather than reporting a stable version |
 | **M2** | Updaters (cargo, helm, generic path + marker, template), minijinja notes template with three contexts + filters + `template print`, changelog marker insert/create, versions-file write, `FileEdit` boundary. **done** | ✅ `release-pr --dry-run` prints exactly the diff it would write; duplicate-output and re-parse checks fire. 198 tests green |
 | **M3** | Git write path: release PR branch reset/commit, committer identity, `release_branches` allowlist, templated `release_pr_branch`, `--no-push` end to end. **done** | ✅ **`release-pr --no-push` produces a real local release commit**, inspectable with `git show`, with the working tree untouched (#100). The #32 staleness refusal and the #80 collision check both fire. 216 tests green |
-| **M4** | `Forge` trait (9 methods) + GitHub adapter, upsert by head branch, auth via `GIT_ASKPASS`, retries/error mapping, **staleness model** (committer guard, draft, comment, close on empty plan) | Real release PR on GitHub; hand-editing the release PR branch makes cicada refuse, draft the PR, and fail loudly |
+| **M4** | `Forge` trait (9 methods) + GitHub adapter, upsert by head branch, auth via `GIT_ASKPASS`, retries/error mapping, **staleness model** (committer guard, draft, comment, close on empty plan). **built, one half unverified** | Protocols asserted against a recording fake; fetch/push/lease against a real bare repo; askpass end to end. 251 tests green. **Not yet verified: real HTTP against github.com** — that needs a token and a repo, and is the remaining gate |
 | **M5** | Phase B: tag reconciliation (reachability + collision), **independent release-object reconciliation**, stale-merge detection, release manifest (disk + embedded), `cicada run` ordering | merge → tag → release; re-run is a no-op; a simulated failed release call self-heals on the next run; a maintenance branch releases independently of `main` |
 | **M6** | GitLab adapter (REST v4, draft-as-title-prefix, self-hosted `api_url`) | Same flow green on GitLab |
 | **M7** | Shipped CI templates (Actions composite action, GitLab `include:`), docs incl. the CI-trigger footgun and a worked `cicada.toml` per repo shape | Third party can adopt from the README alone |

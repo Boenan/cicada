@@ -81,6 +81,15 @@ pub enum GitError {
     Io(#[from] std::io::Error),
     #[error("git emitted output that is not valid UTF-8 ({0})")]
     Encoding(&'static str),
+
+    /// `--force-with-lease` refused: the remote moved between the read and the
+    /// push. Self-correcting — the next run replans against the new tip — so it
+    /// is reported as its own condition rather than as a generic git failure.
+    #[error(
+        "the remote `{branch}` moved while cicada was working, so the push was refused\n\
+         nothing was lost; run again and cicada will recompute against the new tip"
+    )]
+    LeaseLost { branch: String },
 }
 
 /// The git operations cicada needs. M0 uses the read half; the write half lands
@@ -126,6 +135,37 @@ pub trait GitBackend {
     /// **The working tree and the real index are never touched** (#100). See
     /// [`CommitRequest`] for why that matters more than it looks.
     fn commit_edits(&self, req: &CommitRequest<'_>) -> Result<CommitOutcome, GitError>;
+
+    /// Fetch one branch from `url` and return the sha it points at there, or
+    /// `None` when the remote does not have it.
+    ///
+    /// **This is what makes #32's guard real.** `branch_tip` reads
+    /// `refs/heads/…`, which in CI does not exist: a fresh clone has no local
+    /// `cicada/main`, so a guard that consulted only the local ref would see
+    /// nothing, find no human commit, and force-push over one. The branch that is
+    /// about to be clobbered is the **remote** one, so that is the branch the
+    /// guard has to look at.
+    fn fetch_branch(
+        &self,
+        url: &str,
+        branch: &str,
+        env: &[(String, String)],
+    ) -> Result<Option<String>, GitError>;
+
+    /// Force-push `sha` to `branch` on `url`, refusing if the remote has moved
+    /// away from `expected` since it was read.
+    ///
+    /// `--force-with-lease` rather than `--force`: cicada's own guard closes the
+    /// window it can see, and the lease closes the one it cannot — a second Phase
+    /// A run, or a human, landing a commit between the fetch and the push (D6).
+    fn push_branch(
+        &self,
+        url: &str,
+        sha: &str,
+        branch: &str,
+        expected: Option<&str>,
+        env: &[(String, String)],
+    ) -> Result<(), GitError>;
 
     /// A remote's URL, or `None` when the remote is not configured.
     ///

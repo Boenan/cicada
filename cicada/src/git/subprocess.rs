@@ -283,6 +283,65 @@ impl GitBackend for GitCli {
         Ok(CommitOutcome { sha, created: true })
     }
 
+    fn fetch_branch(
+        &self,
+        url: &str,
+        branch: &str,
+        env: &[(String, String)],
+    ) -> Result<Option<String>, GitError> {
+        // Into a dedicated ref rather than `refs/remotes/origin/…`: cicada must
+        // not quietly rewrite the remote-tracking refs of the workspace it was
+        // handed, and the answer it needs is this one branch.
+        let local = format!("refs/cicada/head/{branch}");
+        let refspec = format!("+refs/heads/{branch}:{local}");
+        let env: Vec<(&str, String)> = env.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+
+        // A branch the remote does not have is an answer, not an error: it is the
+        // ordinary state before cicada has ever run on this line.
+        match run_full(&self.root, &["fetch", "--no-tags", "--quiet", url, &refspec], &env, None) {
+            Ok(_) => {}
+            Err(GitError::Command { stderr, .. })
+                if stderr.contains("couldn't find remote ref")
+                    || stderr.contains("does not appear to be a git repository") =>
+            {
+                return Ok(None);
+            }
+            Err(e) => return Err(e),
+        }
+        self.rev_parse(&local)
+    }
+
+    fn push_branch(
+        &self,
+        url: &str,
+        sha: &str,
+        branch: &str,
+        expected: Option<&str>,
+        env: &[(String, String)],
+    ) -> Result<(), GitError> {
+        let lease = match expected {
+            // The precise form: refuse unless the remote is still exactly where
+            // it was when cicada read it.
+            Some(e) => format!("--force-with-lease={branch}:{e}"),
+            // No remote branch yet, so there is nothing to lease against — but
+            // `--force-if-includes` is wrong here too, since the branch is
+            // replaced rather than advanced. Requiring creation is the check.
+            None => "--force-with-lease".to_string(),
+        };
+        let refspec = format!("{sha}:refs/heads/{branch}");
+        let env: Vec<(&str, String)> = env.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+
+        match run_full(&self.root, &["push", "--quiet", &lease, url, &refspec], &env, None) {
+            Ok(_) => Ok(()),
+            Err(GitError::Command { stderr, .. })
+                if stderr.contains("stale info") || stderr.contains("fetch first") =>
+            {
+                Err(GitError::LeaseLost { branch: branch.to_string() })
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     fn assert_not_shallow(&self) -> Result<(), GitError> {
         if self.git(&["rev-parse", "--is-shallow-repository"])?.trim() == "true" {
             return Err(GitError::ShallowClone);

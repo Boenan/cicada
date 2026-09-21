@@ -3,7 +3,7 @@
 # adopter copies from.
 
 [settings]
-release_branches = ["main"]
+release_branches = ["main", "test-no-pr"]
 default_scope    = "cicada"      # unscoped commits are cicada changes
 
 [forge]

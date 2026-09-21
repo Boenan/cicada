@@ -9,15 +9,16 @@ next* and *what is easy to get wrong*.
 
 | | |
 |---|---|
-| **Design** | Complete. `docs/design.md`, 100 numbered decisions, every section walked and argued through. **No open questions** |
+| **Design** | Complete. `docs/design.md`, 102 numbered decisions, every section walked and argued through. **No open questions** |
 | **Behavioural coverage** | `docs/scenarios/single-service.md` (~140 scenarios, groups A–N) and `docs/scenarios/monorepo.md` (groups O–Y, only what needs N > 1), in five-surface form, doubling as the acceptance suite. Four HTML walkthroughs under `docs/scenarios/single-service/` |
 | **Deferred scope** | `docs/future-work.md`, 16 items, each with why it was deferred and what would trigger it |
 | **M0 spike** | **Done and confirmed.** `spikes/yaml-splice`, 15 tests green |
 | **M0** | **Done.** Two-crate workspace, config parsing, `GitBackend` + subprocess impl, conventional-commit parser, `cicada check`. 52 tests green |
 | **M1** | **Done.** Versions file, scope routing, bump computation, chart tracking, umbrella aggregation, anchor resolution, `Plan`, `cicada plan [--json]` |
 | **M2** | **Done.** Updaters (cargo, helm, generic path + marker, template), templates with three contexts + filters + `template print`, changelog insertion, versions-file write, the `FileEdit` boundary, `release-pr --dry-run` |
-| **M3** | **Done.** The git write path: release PR branch, committer identity, the #32 refusal, the #80 collision check, `--no-push` end to end. 216 tests green. One gap: prereleases — see below |
-| **Production code** | `cicada-core/` (pure) and `cicada/` (lib + bin). Next milestone is M4 |
+| **M3** | **Done.** The git write path: release PR branch, committer identity, the #32 refusal, the #80 collision check, `--no-push` end to end |
+| **M4** | **Built; one half unverified.** `Forge` trait + GitHub adapter, `GIT_ASKPASS` auth, fetch/push with a lease, the staleness model's forge half. 251 tests green. **Real HTTP against github.com is not yet exercised** — see below |
+| **Production code** | `cicada-core/` (pure) and `cicada/` (lib + bin). Next milestone is M5 |
 
 **The scenario pass rewrote parts of the design.** Decisions #73–#85 all came out of writing expected
 outcomes down, and four earlier decisions were reversed outright — see *Do not re-litigate* below, and note
@@ -273,6 +274,55 @@ test passed anyway, because two runs inside one second produce the same sha rega
 
 ---
 
+## M4 is built, and half of its exit criterion is unverified
+
+The criterion is *"Real release PR on GitHub; hand-editing the release PR branch makes cicada refuse, draft
+the PR, and fail loudly."* The second half is done and tested. **The first half is not**: creating a pull
+request on a real repository needs a token and an account, so it has not been exercised. Everything below it
+has:
+
+| Surface | How it is verified |
+|---|---|
+| The three forge protocols (#34, #33 layer 2, #77) | Asserted against a recording fake on the *ordered list of calls* — including calls that must **not** happen (D5a) |
+| Error mapping (#58) | Unit tests on the mapper: a 403 names `pull-requests: write`, a 404 says a private repo answers 404 rather than 403 |
+| Retry policy (#58) | Unit tests: 5xx and 429 only, `Retry-After` honoured and capped |
+| `fetch_branch` / `push_branch` / the lease | Against a **real bare repo**, including a genuine lost-lease race |
+| `GIT_ASKPASS` | End to end through the real binary, plus a check that the token never reaches `--help` or `-vvv` |
+| The GitHub HTTP calls themselves | **Not verified.** Written against the documented API; unproven until run |
+
+What landed, and where:
+
+| Piece | Location |
+|---|---|
+| `Forge` trait, types, retry policy (#53, #58) | `cicada/src/forge/mod.rs` |
+| GitHub adapter, REST + one GraphQL mutation | `cicada/src/forge/github.rs` |
+| The three protocols, unit-tested | `cicada/src/forge/flow.rs` |
+| Recording fake | `cicada/src/forge/fake.rs` |
+| Token, `GIT_ASKPASS`, SSH→HTTPS (#18) | `cicada/src/auth.rs` |
+| `fetch_branch`, `push_branch`, `--force-with-lease` | `cicada/src/git/` |
+
+### The bug M3 shipped, found while wiring the push
+
+**#32's guard was inert in CI** — the only place it matters. `branch_tip` reads `refs/heads/cicada/main`, and
+a fresh CI clone has no such local branch. So the guard saw `None`, found no human commit, and would have
+force-pushed straight over one. The branch at risk is the **remote** one; that is now what gets fetched and
+judged (#101), and the push carries `--force-with-lease` against exactly the sha that was read, so the window
+cicada cannot see is closed by git rather than by luck.
+
+This is the same shape as every other bug these docs record: a stated property contradicted by the algorithm
+meant to deliver it, invisible from reading the section it lived in, and surfaced only by tracing what
+actually happens in the environment the feature exists for.
+
+### The design was optimistic about GitHub drafting
+
+#54 calls it "a real API field (`draft: true`)". That is true at **creation** and false afterwards — `PATCH
+/pulls/{n}` has no `draft` parameter, and converting an existing PR is the GraphQL mutation
+`convertPullRequestToDraft`. Staleness layer 2 drafts a PR that already exists, which is exactly the case
+REST cannot express. Recorded as #102; the visible consequence is that `set_draft` takes the whole
+`PullRequest` rather than a number, because a node id is needed to name the thing being changed.
+
+---
+
 ## Constraints that are easy to violate
 
 These are cheap to honour from the start and expensive to retrofit:
@@ -297,6 +347,8 @@ These are cheap to honour from the start and expensive to retrofit:
 | #88 | `initial_version` is required on a package with a `helm` updater, and `Chart.yaml` is still never read back (#75). The requirement exists so cicada never invents a chart's first version |
 | #97 | A derived release still writes a changelog entry. It has no commits, so the body comes from `derived_from` in the notes context — never an empty entry, never a skipped one, and never prose emitted by core |
 | #96 | Releases are created in config order, umbrella last. Deterministic ordering is what makes the forge-call log assertable, and the umbrella's body embeds a manifest describing the releases created before it |
+| #101 | The staleness guard's subject is the branch **about to be overwritten** — remote when pushing, local otherwise. Reading only `refs/heads/` makes it inert in CI, which is the one environment it exists for |
+| #18 | The token never reaches `argv`, `.git/config`, or a log. `Token` has no `Debug`/`Display` on purpose; adding one puts a credential in a CI log the first time someone writes `tracing::debug!(?token)` |
 | #100 | The release commit is built through a **private index**, never a checkout. The working tree, the real index and the current branch stay exactly as they were. Reintroducing a checkout breaks local rehearsal, error unwinding and concurrent runs at once |
 | #32 | The staleness refusal and the #80 collision check run under `--dry-run` as well. A rehearsal that reports success where the real run refuses is worse than no rehearsal |
 | #99 | Updater edits **fold**, one `FileEdit` per path, in config order. Emitting one edit per *updater* reintroduces last-writer-wins — the exact bug #44 names — and it is silent. The hard error is only for a whole-file writer sharing a path |
@@ -385,28 +437,35 @@ Four features were removed rather than deferred quietly, and two of them change 
 
 ---
 
-## Next: M4
+## Next: verify M4, then M5
 
-The `Forge` trait (nine methods, #53) plus the GitHub adapter: upsert by head branch, auth via `GIT_ASKPASS`,
-retries and error mapping, and the staleness model's forge half. Exit criterion: a real release PR on GitHub,
-and hand-editing the release PR branch makes cicada refuse, draft the PR, and fail loudly.
+**First, the gate M4 has not passed.** Run it against a real repository with a token:
 
-M3 leaves the local half of all of that done:
+```
+CICADA_TOKEN=… cicada release-pr        # on a release branch, with something to release
+```
 
-- **The refusal already works** (#32) — it exits `4` and explains itself. M4 adds the forge consequences:
-  `set_draft(true)`, `set_labels(["cicada:stale"])` and `comment(<why>)`, which are what make the stale PR
-  *unmergeable* rather than merely unrefreshed (layer 2).
-- **The push is the only git operation left.** `commit_edits` writes the branch; `push --force-with-lease`
-  is one method beside it, and the token goes in through `GIT_ASKPASS` and never into `argv` or
-  `.git/config` (#18).
-- **`find_pull_request` keys on the head branch**, never the title (#77) — that is what makes the upsert
-  idempotent and stops two concurrent runs opening two PRs.
-- **The empty-plan path grows a forge call** (#34, D5a/D5b): `find_pull_request` once, and
-  `close_pull_request` only if one is open. On a quiet repo that is the most-executed path in the tool.
-- **The PR body is already rendered.** `Rendered.notes` carries the exact string the changelog entry used
-  (#43), so the release body must reuse it rather than render its own.
+and check three things: the pull request opens with the notes as its body, a second run *updates* that same
+PR rather than opening another, and hand-editing `cicada/<branch>` then re-running drafts the PR, labels it
+`cicada:stale`, comments, and exits `4`. Those are the assertions the fake already makes; what is unproven is
+the HTTP underneath them. Expect the first failures to be in the places adapters always fail — the `head`
+qualifier on the PR search, the GraphQL mutation shape, and error bodies that are not JSON.
 
-Delete the `anyhow::bail!` in `cmd_release_pr` that names M4 — it is the seam.
+**Then M5**, which is the first end-to-end release tool: Phase B — tag reconciliation with the reachability
+and collision checks, **independent** release-object reconciliation (#56), the stale-merge recomputation
+(#33 layer 3, #78, #90), the release manifest (#42, #57), and `cicada run` doing Phase B **before** Phase A
+(#35).
+
+Three things M4 leaves ready for it:
+
+- **`find_release` and `create_release` already exist** on the trait and in both the adapter and the fake,
+  and `find_release` returns `Ok(None)` on a 404 — absent is an answer, which is what makes tag and release
+  reconcile independently (#56).
+- **The notes are already rendered** and reused verbatim (#43), so the release body must take
+  `Rendered.notes`, not render again.
+- **`cicada run` needs Phase A and Phase B composed in one place.** That is the moment to lift the
+  orchestration out of `main.rs` the way the forge protocols were lifted into `forge/flow.rs` — CI must not
+  be able to express the broken order (#35), and a function that runs them in sequence is what guarantees it.
 
 ---
 
