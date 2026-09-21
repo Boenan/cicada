@@ -187,6 +187,7 @@ adapters cheap instead of a rewrite.
 | 95 | The date is an **explicit input** — `--date YYYY-MM-DD`, defaulting to today in **UTC** — threaded into `cicada-core` as data, exactly as the forge adapter supplies `LinkStyle` (A2). It is the only clock cicada reads, and it feeds one thing: the date on a changelog or release-notes entry. Core therefore never reads a clock, and `--dry-run` at 23:59 cannot differ from the run that follows it at 00:01 (#30) |
 | 96 | Within one run, releases are created in **config order (#31), umbrella last**. Deterministic, so the forge-call log is assertable; umbrella last, so its embedded manifest describes work already done rather than work in flight |
 | 97 | A **derived** release (#22) still writes its changelog entry — never skipped. The notes context carries `derived_from` (the package and version that caused it), and the default template renders one line naming the cause when the release has no commits of its own. Core supplies the fact as data; the template decides the words (#46) |
+| 98 | An unknown scope is fatal **only on a commit that can release** (#11). A type whose section is `bump = "none"` has no attribution to get wrong, and `chore(deps): bump serde` — the design's own canonical non-releasable example (#36) — names no package on any repo. `check` reports it as a **warning**, so it stays visible without blocking a release |
 
 ---
 
@@ -839,9 +840,26 @@ BREAKING CHANGE: retries are now on by default
 ```
 
 - `type` — matched against configured changelog sections; unknown types are ignored (not errors).
-- `scopes` — comma-separated list; each must resolve to a configured package or it is a **hard error**.
+- `scopes` — comma-separated list; each must resolve to a configured package or it is a **hard error** —
+  but only on a commit that can release (#98). See *The scope rule is about attribution* below.
 - Breaking — `!` after the scope, or a `BREAKING CHANGE:` footer.
 - Empty scope → attributed to `default_scope` (#38).
+
+**The scope rule is about attribution, so it reaches exactly as far as attribution does** (#98). An unknown
+scope is fatal because a `feat` filed under a scope nobody recognises would be silently dropped from the
+release it belongs to — the version would be wrong and nothing would say so. A commit whose type computes
+`bump = "none"` cannot do that: it moves no number, and wherever it is attributed it renders the same text.
+
+The case is not hypothetical, and the design already relies on it. `chore(deps): bump serde` is this
+document's own worked example of a non-releasable commit (§Bump computation, scenarios B8/B9/D5b), and `deps`
+names no package in any repo — it is what Dependabot and Renovate write, unprompted, on every repository they
+touch. Under a blanket rule the design would contradict itself, and every repo with a dependency bot would be
+unable to release at all until it reconfigured that bot. That is the same adoption wall that made
+`Release-As:` an **ignored** footer rather than an error (#39, E1).
+
+So the rule is narrowed to what it is for, and the residue is handled where it belongs: `check` reports an
+unresolvable scope on a non-releasable commit as a **warning** — printed, named, did-you-mean included, and
+not counted toward exit `3`. A typo stays visible; a bot does not block a release.
 
 **Which commits are read** (#40). In a squash-merge repo the commits on main *are* the PR titles — the forge
 puts the title into the squashed commit — so cicada never needs to know your merge strategy. It only matters
@@ -1554,7 +1572,7 @@ Two sequencing principles, both learned from the decisions above:
 | M | Content | Exit criterion |
 |---|---|---|
 | **M0** | Workspace (`cicada-core` pure + `cicada`), config parsing, `GitBackend` + subprocess impl, conventional-commit parser (multi-scope, breaking, footers). ~~Spike: span-preserving YAML splice~~ **done** | `cicada check` lints a range with did-you-mean suggestions. ✅ Spike complete: `spikes/yaml-splice`, 15 cases green |
-| **M1** | Anchor resolution (per-package ranges, tag reachability), scope routing incl. `default_scope`, bump computation (section `bump`, first-release table, `pre_major`, `maintenance` guard), umbrella aggregation, `Plan` | `cicada plan --json` correct on a fixture **monorepo and a single-package repo through the same code path**, fully offline |
+| **M1** | Anchor resolution (per-package ranges, tag reachability), scope routing incl. `default_scope`, bump computation (section `bump`, first-release table, `pre_major`, `maintenance` guard), umbrella aggregation, `Plan`. **done** | ✅ `cicada plan --json` correct on a fixture **monorepo and a single-package repo through the same code path**, fully offline. 111 tests green. One gap: a branch matching `prerelease_branches` refuses rather than reporting a stable version |
 | **M2** | Updaters (cargo, helm, generic path + marker, template), minijinja notes template with three contexts + filters + `template print`, changelog marker insert/create, versions-file write, `FileEdit` boundary | `release-pr --dry-run` prints exactly the diff it would write; snapshot tests green; duplicate-output and re-parse checks fire |
 | **M3** | Git write path: release PR branch reset/commit, committer identity, `release_branches` allowlist, templated `release_pr_branch`, `--no-push` end to end | **`release-pr --no-push` produces a real local release commit**, inspectable with `git show`. First dogfooding gate — no token, no network |
 | **M4** | `Forge` trait (9 methods) + GitHub adapter, upsert by head branch, auth via `GIT_ASKPASS`, retries/error mapping, **staleness model** (committer guard, draft, comment, close on empty plan) | Real release PR on GitHub; hand-editing the release PR branch makes cicada refuse, draft the PR, and fail loudly |

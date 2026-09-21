@@ -106,3 +106,88 @@ pub fn summarise(style: &Style, problems: usize, commits: usize) -> String {
 fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
+
+// --- the plan ------------------------------------------------------------
+
+/// What `cicada plan` prints. One line per release, aligned, with the commits
+/// that earned it beneath — so "why" is answered on the same screen as "what".
+///
+/// An empty plan is a **successful** outcome (#68), so it says so plainly rather
+/// than printing an empty table that reads like a failure.
+pub fn render_plan(style: &Style, plan: &cicada_core::plan::Plan) -> String {
+    use cicada_core::plan::Reason;
+
+    if plan.is_empty() {
+        return format!("  {}\n", style.dim("nothing to release"));
+    }
+
+    let width = plan.releases.iter().map(|r| r.name.chars().count()).max().unwrap_or(0);
+    let mut s = String::new();
+    for r in &plan.releases {
+        let from = match &r.from {
+            Some(v) => v.to_string(),
+            // A first release has no previous version, and saying `0.0.0` would
+            // name one that never existed (#89).
+            None => "—".to_string(),
+        };
+        s.push_str(&format!(
+            "  {:width$}  {} {} {}  {}",
+            r.name,
+            style.dim(&from),
+            style.dim("→"),
+            r.to,
+            style.dim(r.bump.as_str()),
+            width = width,
+        ));
+        let note = match r.reason {
+            Reason::FirstRelease => Some("first release".to_string()),
+            Reason::Aggregate => Some("aggregate".to_string()),
+            Reason::Derived => r
+                .derived_from
+                .as_ref()
+                .map(|d| format!("tracks {} {}", d.package, d.version)),
+            Reason::Commits => None,
+        };
+        if let Some(n) = note {
+            s.push_str(&format!("  {}", style.dim(&format!("({n})"))));
+        }
+        s.push('\n');
+        for c in &r.commits {
+            let scopes =
+                if c.scopes.is_empty() { String::new() } else { format!("({})", c.scopes.join(",")) };
+            let bang = if c.breaking { "!" } else { "" };
+            s.push_str(&format!(
+                "  {:width$}  {}\n",
+                "",
+                style.dim(&format!("{}{scopes}{bang}: {}", c.kind, c.description)),
+                width = width,
+            ));
+        }
+    }
+    let n = plan.releases.len();
+    s.push_str(&format!("\n  {} release{}\n", n, plural(n)));
+    s
+}
+
+/// Escape a string for a JSON document.
+///
+/// The `--json` payloads are hand-rolled rather than serialised, because the
+/// schema is a contract (#69) and writing it out is what makes that visible — but
+/// escaping is not a place for judgement, so it lives in one function that both
+/// payloads use. Control characters below 0x20 are escaped as `\uXXXX`; a commit
+/// subject can contain them.
+pub fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}

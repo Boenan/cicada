@@ -9,10 +9,11 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
-use cicada_core::check::{Severity, lint_commits, validate_config, validate_release_pr_branch};
+use cicada_core::check::{Finding, Severity, lint_commits, validate_config, validate_release_pr_branch};
+use cicada_core::plan::{PlanError, PlanInput};
 use cicada::git::{GitBackend, GitCli};
 use cicada::report::Style;
-use cicada::{config, report};
+use cicada::{config, history, report, versions};
 
 /// Exit codes are a contract, not an implementation detail (#68). CI branches on
 /// them, so `3` (your commits are malformed) and `4` (cicada declined to act) are
@@ -22,7 +23,6 @@ mod exit {
     pub const ERROR: u8 = 1;
     // 2 is clap's, for usage errors.
     pub const FINDINGS: u8 = 3;
-    #[allow(dead_code)]
     pub const REFUSED: u8 = 4;
 }
 
@@ -37,6 +37,12 @@ struct Cli {
     /// Path to cicada.toml. Defaults to the repository root.
     #[arg(long, global = true, value_name = "PATH")]
     config: Option<PathBuf>,
+
+    /// The date changelog and release-notes entries carry. Defaults to today in
+    /// UTC. An input rather than a clock read (#95), so a rehearsal and the run
+    /// that follows it produce identical bytes rather than identical-looking ones.
+    #[arg(long, global = true, value_name = "YYYY-MM-DD")]
+    date: Option<jiff::civil::Date>,
 
     /// Machine-readable output.
     #[arg(long, global = true)]
@@ -68,6 +74,15 @@ enum Command {
         #[arg(long, value_name = "REF", default_value = "HEAD")]
         head: String,
     },
+
+    /// What would be released, and why. Touches nothing.
+    ///
+    /// Fully offline: no token, no network, no forge (#25, §Goals 6). Unlike
+    /// `run`, it is **not** gated on `release_branches` — it answers a question
+    /// rather than performing a release, and refusing to answer it on a feature
+    /// branch would make the rehearsal useless exactly where it is wanted. When
+    /// the branch is outside the gate it says so.
+    Plan,
 }
 
 fn main() -> ExitCode {
@@ -101,7 +116,18 @@ fn init_tracing(verbosity: u8) {
 fn run(cli: &Cli) -> anyhow::Result<u8> {
     match &cli.command {
         Command::Check { base, head } => cmd_check(cli, base.as_deref(), head),
+        Command::Plan => cmd_plan(cli),
     }
+}
+
+/// Today in **UTC** (#95).
+///
+/// UTC rather than a configurable zone: a zone is one more input that changes the
+/// answer, and a changelog entry dated by the release runner's locale is a worse
+/// artifact than one dated consistently. This is the only clock cicada reads, and
+/// it is read here — in the binary — so `cicada-core` stays pure.
+fn today_utc() -> jiff::civil::Date {
+    jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::UTC).date()
 }
 
 fn cmd_check(cli: &Cli, base: Option<&str>, head: &str) -> anyhow::Result<u8> {
@@ -160,9 +186,7 @@ fn json_report(
     findings: &[cicada_core::check::Finding],
     reports: &[cicada_core::check::CommitReport],
 ) -> String {
-    let esc = |s: &str| {
-        s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\t', "\\t")
-    };
+    let esc = report::json_escape;
     let finding_json = |f: &cicada_core::check::Finding| {
         let sev = match f.severity {
             Severity::Problem => "problem",
@@ -198,5 +222,189 @@ fn json_report(
         "{{\"schema\":1,\"config\":[{}],\"commits\":[{}]}}\n",
         config.join(","),
         commits.join(",")
+    )
+}
+
+/// Every config finding — the pure half and the filesystem half — in one list.
+///
+/// `check` renders these and exits `3`; every other command treats a `Problem`
+/// as fatal and exits `1`, because it cannot proceed on a config it has already
+/// found incoherent (I4–I6c).
+fn gather_config_findings(
+    repo: &GitCli,
+    cfg: &cicada_core::Config,
+    branch: Option<&str>,
+) -> Vec<Finding> {
+    let mut findings = validate_config(cfg);
+    findings.extend(config::validate_on_disk(cfg, repo.root()));
+    if let Some(b) = branch
+        && let Some(f) = validate_release_pr_branch(cfg, b)
+    {
+        findings.push(f);
+    }
+    findings
+}
+
+fn cmd_plan(cli: &Cli) -> anyhow::Result<u8> {
+    let cwd = std::env::current_dir()?;
+    let repo = GitCli::discover(&cwd)?;
+
+    // Up front, before any range is computed, so a truncated history is never
+    // mistaken for a short one (H8).
+    repo.assert_not_shallow()?;
+
+    let loaded = config::load(repo.root(), cli.config.as_deref())?;
+    let cfg = &loaded.config;
+    let branch = repo.current_branch()?;
+
+    let findings = gather_config_findings(&repo, cfg, branch.as_deref());
+    if findings.iter().any(|f| f.severity == Severity::Problem) {
+        eprint!("{}", report::render_config_findings(&Style::detect(), &findings));
+        anyhow::bail!("cicada.toml is not usable — `cicada check` lists every problem");
+    }
+
+    let branch_name = branch.clone().unwrap_or_else(|| "HEAD".to_string());
+    let on_release_branch =
+        cicada_core::branch::matches_any(&cfg.settings.release_branches, &branch_name)?;
+    let maintenance =
+        cicada_core::branch::matches_any(&cfg.settings.maintenance_branches, &branch_name)?;
+
+    // The one deliberate gap in M1. A prerelease branch would compute a *stable*
+    // version here, which is not a missing feature but a wrong answer — and a
+    // plan that lies offline defeats the point of it running offline (§Goals 6).
+    // Refusing is loud; computing would be quiet. Deleting this block is what
+    // lands prerelease support.
+    if cicada_core::branch::matches_any(&cfg.settings.prerelease_branches, &branch_name)? {
+        anyhow::bail!(
+            "'{branch_name}' matches `prerelease_branches`, and prerelease planning is not \
+             implemented yet\ncicada would otherwise report a stable version here, which would be \
+             wrong rather than incomplete"
+        );
+    }
+
+    let versions = versions::load(&loaded.path)?;
+    tracing::debug!(
+        versions = %versions.path.display(),
+        exists = versions.exists,
+        "loaded versions file"
+    );
+
+    let collected = history::collect(&repo, cfg, &versions.versions, "HEAD")?;
+    for (target, anchor) in &collected.anchors {
+        tracing::debug!(?target, anchor = ?anchor, "resolved anchor");
+    }
+
+    let input = PlanInput {
+        config: cfg,
+        versions: &versions.versions,
+        history: &collected.history,
+        maintenance,
+        branch: branch_name.clone(),
+    };
+    let plan = match cicada_core::plan::plan(&input) {
+        Ok(p) => p,
+        // "cicada declined to act" is exit `4`, distinct from "cicada broke" (#68)
+        // — a pipeline may well want to handle them differently.
+        Err(e @ PlanError::MaintenanceGuard { .. }) => {
+            eprintln!("error: {e}");
+            return Ok(exit::REFUSED);
+        }
+        // An unknown scope is fatal for the whole run (#11, O5): releasing the
+        // half that parsed would cut a version whose changelog is missing the
+        // change that motivated it.
+        Err(e) => {
+            eprintln!("error: {e}");
+            return Ok(exit::ERROR);
+        }
+    };
+
+    let date = cli.date.unwrap_or_else(today_utc);
+
+    if cli.json {
+        print!("{}", plan_json(&date, &branch_name, on_release_branch, &plan));
+    } else if !cli.quiet {
+        let style = Style::detect();
+        print!("{}", report::render_plan(&style, &plan));
+        if !on_release_branch {
+            // Not an error: `plan` is a question, and the answer is the same
+            // wherever it is asked. But `run` here would exit 0 without acting
+            // (#26, H1), and discovering that from a silent pipeline is worse
+            // than reading it now.
+            eprintln!(
+                "\nnote: '{branch_name}' matches no `release_branches` pattern — `cicada run` \
+                 would exit 0 here without releasing"
+            );
+        }
+    }
+
+    // "Nothing to release" is a normal outcome, not a failure (#68).
+    Ok(exit::OK)
+}
+
+/// The `plan --json` payload (#69).
+///
+/// Hand-rolled for the same reason `check`'s is: the schema is a machine
+/// interface with a compatibility promise, and writing it out keeps that visible
+/// rather than emergent from a derive. Fields may be added within `schema`;
+/// removals or meaning changes bump it.
+fn plan_json(
+    date: &jiff::civil::Date,
+    branch: &str,
+    on_release_branch: bool,
+    plan: &cicada_core::plan::Plan,
+) -> String {
+    let esc = report::json_escape;
+    let releases: Vec<String> = plan
+        .releases
+        .iter()
+        .map(|r| {
+            let commits: Vec<String> = r
+                .commits
+                .iter()
+                .map(|c| {
+                    let scopes: Vec<String> =
+                        c.scopes.iter().map(|s| format!("\"{}\"", esc(s))).collect();
+                    format!(
+                        r#"{{"sha":"{}","type":"{}","scopes":[{}],"breaking":{},"description":"{}"}}"#,
+                        esc(&c.sha),
+                        esc(&c.kind),
+                        scopes.join(","),
+                        c.breaking,
+                        esc(&c.description)
+                    )
+                })
+                .collect();
+            // `from` is null on a first release — present and explicit (#89).
+            // `"0.0.0"` names a version that never existed and produces compare
+            // URLs that 404; omitting the key is ambiguous with an older schema.
+            let from = match &r.from {
+                Some(v) => format!("\"{}\"", esc(&v.to_string())),
+                None => "null".to_string(),
+            };
+            let derived = match &r.derived_from {
+                Some(d) => format!(
+                    r#"{{"package":"{}","version":"{}"}}"#,
+                    esc(&d.package),
+                    esc(&d.version.to_string())
+                ),
+                None => "null".to_string(),
+            };
+            format!(
+                r#"{{"package":"{}","from":{from},"to":"{}","bump":"{}","reason":"{}","tag":"{}","derived_from":{derived},"commits":[{}]}}"#,
+                esc(&r.name),
+                esc(&r.to.to_string()),
+                r.bump.as_str(),
+                r.reason.as_str(),
+                esc(&r.tag),
+                commits.join(",")
+            )
+        })
+        .collect();
+
+    format!(
+        "{{\"schema\":1,\"date\":\"{date}\",\"branch\":\"{}\",\"release_branch\":{},\"releases\":[{}]}}\n",
+        esc(branch),
+        on_release_branch,
+        releases.join(",")
     )
 }

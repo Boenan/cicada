@@ -147,6 +147,9 @@ pub struct Section {
     pub hidden: bool,
 }
 
+/// Declaration order **is** the ordering (#36): `max` over a range's commits is
+/// how the largest justified bump is found, so `None < Patch < Minor < Major` is
+/// load-bearing rather than cosmetic.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum Bump {
@@ -154,6 +157,17 @@ pub enum Bump {
     Patch,
     Minor,
     Major,
+}
+
+impl Bump {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Bump::None => "none",
+            Bump::Patch => "patch",
+            Bump::Minor => "minor",
+            Bump::Major => "major",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]

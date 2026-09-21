@@ -6,10 +6,16 @@
 //! belongs in the `cicada` binary instead.
 
 pub mod branch;
+pub mod bump;
 pub mod check;
 pub mod commit;
 pub mod config;
+pub mod plan;
+pub mod route;
+pub mod versions;
 
 pub use check::{Finding, Severity};
 pub use commit::{Footer, ParseError, ParsedCommit, RawCommit};
 pub use config::{Bump, CommitSource, Config, PackageId, Target};
+pub use plan::{DerivedFrom, Plan, PlanError, PlanInput, Reason, Release, render_tag};
+pub use versions::VersionsFile;

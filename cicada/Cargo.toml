@@ -11,6 +11,8 @@ cicada-core.workspace = true
 
 anyhow.workspace  = true
 clap.workspace    = true
+jiff.workspace    = true
+semver.workspace  = true
 thiserror.workspace = true
 toml.workspace    = true
 tracing.workspace = true

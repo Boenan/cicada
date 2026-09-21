@@ -14,8 +14,9 @@
 //! resolving to one Cargo version field (#24) — cannot live here (#29). They are
 //! in the binary and append to the same `Vec<Finding>`.
 
+use crate::bump::commit_bump;
 use crate::commit::{ParseError, ParsedCommit, RawCommit, parse};
-use crate::config::Config;
+use crate::config::{Bump, Config};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
@@ -96,16 +97,39 @@ fn lint_commit(config: &Config, raw: &RawCommit) -> CommitReport {
     if let Some(p) = &parsed {
         // Unknown scope is fatal (#11) — and the did-you-mean is what turns that
         // hard error from an obstacle into help.
+        //
+        // **Fatal only when the commit can release.** #11 exists so a `feat` is
+        // never silently dropped or misfiled, and a commit whose type computes
+        // `bump = "none"` has no attribution to get wrong: it cannot move a
+        // version number and, if it renders at all, renders the same text. The
+        // universal case is `chore(deps): bump serde` — what Dependabot and
+        // Renovate write on every repo — which the design itself uses as the
+        // canonical non-releasable example (#36, B8/B9). Under a blanket rule
+        // every such repo would be unable to release at all until it reconfigured
+        // its bot, which is the same adoption wall that made `Release-As:` an
+        // ignored footer rather than an error (E1).
+        //
+        // It stays *visible*, because a scope nobody resolves is still probably a
+        // typo: it is a warning, which `check` prints and the exit code ignores.
+        let releasable = commit_bump(config, p) > Bump::None;
         for scope in &p.scopes {
             if config.resolve_scope(scope).is_none() {
-                let mut f = Finding::problem(
-                    short_sha(&raw.sha),
-                    format!("unknown scope '{scope}' — no such package"),
-                );
+                let message = format!("unknown scope '{scope}' — no such package");
+                let mut f = if releasable {
+                    Finding::problem(short_sha(&raw.sha), message)
+                } else {
+                    Finding::warning(short_sha(&raw.sha), message)
+                };
                 f = match did_you_mean(scope, &config.scope_targets()) {
                     Some(s) => f.with_help(format!("did you mean '{s}'?")),
                     None => f.with_help(format!("known scopes: {}", config.scope_targets().join(", "))),
                 };
+                if !releasable {
+                    f = f.with_help(format!(
+                        "`{}` does not justify a release, so this commit is ignored rather than blocking one",
+                        p.kind
+                    ));
+                }
                 findings.push(f);
             }
         }
@@ -297,6 +321,22 @@ pub fn validate_config(config: &Config) -> Vec<Finding> {
                 }
                 outputs.push((name.as_str(), o.as_str()));
             }
+        }
+
+        // A first release takes `initial_version` verbatim when it is declared
+        // (#37, A4), so a value that is not semver would otherwise fall back to
+        // the first-release table silently — the package would release at a
+        // number nobody asked for and nothing would say why.
+        if let Some(v) = &pkg.initial_version
+            && v.parse::<semver::Version>().is_err()
+        {
+            out.push(
+                Finding::problem(
+                    format!("packages.{name}.initial_version"),
+                    format!("`{v}` is not a semantic version"),
+                )
+                .with_help("three numeric segments, e.g. `1.0.0` — `1.0` and `v1.0.0` are both rejected"),
+            );
         }
 
         // Helm mandates `version` in Chart.yaml, so the number already exists and

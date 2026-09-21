@@ -172,7 +172,7 @@ exists and is reachable from HEAD.
 | B6 | `0.3.0` | `feat!:` , `pre_major = "major"` | `1.0.0` | opt-in escape |
 | B7 | `1.4.2` | `perf:` | `1.4.3` | `perf` is `bump = "patch"` |
 | B8 | `1.4.2` | `feat:` + `chore(deps):` | `1.5.0` | chore contributes nothing and is `hidden` in the entry |
-| B9 | `1.4.2` | `chore(deps):` only | — | **no release** (#36) — the dependency-bump case |
+| B9 | `1.4.2` | `chore(deps):` only | — | **no release** (#36) — the dependency-bump case. Note `deps` names no package: an unknown scope is fatal only on a commit that *can* release (#98) |
 | B10 | `1.4.2` | `docs:` only | — | no release |
 | B11 | `1.4.2` | `feat:` , branch matches `maintenance_branches` | **error**, exit `4` | the guard refuses rather than clamping (#28) |
 | B14 | `1.4.2` | `feat!:` , branch matches `maintenance_branches` | **error**, exit `4` | the case a clamp handled worst — a breaking change on a patch upgrade |
@@ -943,6 +943,9 @@ Each needs a decision entry or a wording change. Numbered for the discussion, no
 closed in the scope pass that removed forced versions (#39), and four of them dissolved rather than needing
 a rule.
 
+**Delta 23 came later, from building M1 rather than from writing scenarios** — and it was found by this
+file's own B8/B9. See the row below.
+
 | # | Delta | Status |
 |---|---|---|
 | 1 | `[umbrella]` is optional; cicada never assumes an aggregate version | **#73** |
@@ -964,6 +967,7 @@ a rule.
 | 17 | The counter rule (#63) is silent when the identifier changes under an unchanged base | **#93** — reopened when staged prerelease lines came into scope, and answered: the counter resets on a change to the base **or** the identifier. #84's "the base is the only axis" no longer holds, and #85 does not cover it (`beta.3` sorts above `alpha.2`) |
 | 18 | The staleness guard's `prev` could select a prerelease tag, replanning over a possibly-empty range | **#90** — `prev` is stable-only |
 | 19 | Forced versions removed from v1: the maintenance guard loses its escape hatch, and release-branch releases lose the only way to state a line's opening version | **#39**, **#81** — the arrangement is deferred as a unit (future-work §13, §14) |
+| 23 | **B8/B9 contradict #11.** Both use `chore(deps): bump serde` as *the* non-releasable example, and `deps` names no package — so under a blanket "unknown scope is a hard error" the design's own worked example is exit `1`, and every repo whose dependency bot writes that scope can never release. Found when B8/B9 were written as tests and the row explaining the feature failed | **#98** — an unknown scope is fatal only on a commit that **can release**; `check` reports the rest as a warning |
 | 22 | **What goes in a derived release's changelog entry?** A chart dragged by its tracked app receives no commits, so the body renders empty and the design was silent (M1b). *(20 and 21 live in `monorepo.md`; the numbering is shared across both files.)* | **#97** — the entry is written, and the notes context carries `derived_from` so the default template names the cause. Data, not prose cicada emits |
 
 Two findings came out of tracing the single-service lifecycle commit by commit rather than from reading a
@@ -975,6 +979,10 @@ section, which is the method `docs/next-steps.md` recommends:
   rather than requiring a fix; the release **PR** branch guard (#32) is unaffected, because it inspects a branch
   cicada wrote itself with no forge merge in between.
 - **A first release can lower a version file**, and that is correct (#75, A9).
+
+A third came out of building M1 against these scenarios, and it is the same shape as the other two — a
+stated rule contradicted by the example meant to illustrate it (#98, delta 23). It was invisible from reading
+either §Commit parsing or group B; it surfaced the moment B9 was executed rather than read.
 
 ---
 

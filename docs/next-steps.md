@@ -9,12 +9,13 @@ next* and *what is easy to get wrong*.
 
 | | |
 |---|---|
-| **Design** | Complete. `docs/design.md`, 97 numbered decisions, every section walked and argued through. **No open questions** |
+| **Design** | Complete. `docs/design.md`, 98 numbered decisions, every section walked and argued through. **No open questions** |
 | **Behavioural coverage** | `docs/scenarios/single-service.md` (~140 scenarios, groups A–N) and `docs/scenarios/monorepo.md` (groups O–Y, only what needs N > 1), in five-surface form, doubling as the acceptance suite. Four HTML walkthroughs under `docs/scenarios/single-service/` |
 | **Deferred scope** | `docs/future-work.md`, 16 items, each with why it was deferred and what would trigger it |
 | **M0 spike** | **Done and confirmed.** `spikes/yaml-splice`, 15 tests green |
 | **M0** | **Done.** Two-crate workspace, config parsing, `GitBackend` + subprocess impl, conventional-commit parser, `cicada check`. 52 tests green |
-| **Production code** | `cicada-core/` (pure) and `cicada/` (lib + bin). Next milestone is M1 |
+| **M1** | **Done.** Versions file, scope routing, bump computation, chart tracking, umbrella aggregation, anchor resolution, `Plan`, `cicada plan [--json]`. 111 tests green. One gap: prereleases — see below |
+| **Production code** | `cicada-core/` (pure) and `cicada/` (lib + bin). Next milestone is M2 |
 
 **The scenario pass rewrote parts of the design.** Decisions #73–#85 all came out of writing expected
 outcomes down, and four earlier decisions were reversed outright — see *Do not re-litigate* below, and note
@@ -122,6 +123,61 @@ an obstacle into help.
 
 ---
 
+## M1 is done
+
+**Exit criterion met:** `cicada plan --json` is correct on a fixture monorepo *and* a single-package repo
+through the same code path, fully offline — no token, no network, no forge. Both fixtures are driven through
+the real binary against real git repositories in `cicada/tests/plan_cmd.rs`, because anchor resolution,
+reachability and per-package ranges are precisely the parts a pure test cannot reach.
+
+cicada plans its own release: `cicada plan` on this repo reports `cicada — → 0.1.0 minor (first release)`.
+
+What landed, and where:
+
+| Piece | Location |
+|---|---|
+| `.cicada-versions.toml` shape — a version and nothing else (#1, #4, #60) | `cicada-core/src/versions.rs` |
+| Scope routing, multi-scope, `default_scope` (#11, #38) | `cicada-core/src/route.rs` |
+| Bump computation, first-release table, `pre_major` (#36, #37) | `cicada-core/src/bump.rs` |
+| `Plan`, umbrella aggregation, chart tracking, maintenance guard (#10, #22, #28, #96, #97) | `cicada-core/src/plan.rs` |
+| Anchor resolution, per-package ranges (#2, #3) | `cicada/src/history.rs` |
+| `cicada plan`, `--date`, `--json` schema 1 (#69, #89, #95) | `cicada/src/main.rs` |
+
+**Four things the build settled that the design had left implicit:**
+
+1. **The scope rule had to be narrowed, and the design contradicted itself on it** — now #98. `chore(deps):`
+   is this design's canonical non-releasable example, used in four places, and `deps` names no package in any
+   repo. Under a blanket reading of #11 the design's own worked example was a hard error, and every repo with
+   a dependency bot would have been unable to release. Found by writing B8/B9 as tests: `b1_to_b10` failed on
+   the row the design uses to *explain* the feature. An unknown scope is now fatal only on a commit that can
+   release; `check` reports the rest as a **warning**.
+2. **`Release.commits` holds every routed commit, not only the releasable ones.** `bump` and *renders in the
+   changelog* are two questions (#36), and `docs` is `bump = "none"` with a section title — so filtering to
+   releasable commits here would silently empty the Documentation section at M2.
+3. **Chart tracking runs to a fixpoint, not a single pass.** Whether a chart fires depends on whether the
+   package it tracks releases, and a single pass makes that depend on config order — which #31 exists to stop
+   mattering. Bumps only increase and are bounded by major, so a fixpoint terminates.
+4. **`plan` is not gated on `release_branches`.** The gate decides where cicada may *write* (#26); `plan`
+   writes nothing and answers a question, and refusing to answer it on a feature branch would make the
+   offline rehearsal useless exactly where it is wanted. It prints a note when the branch is outside the
+   gate, because a `run` that exits 0 silently is worse than a line of output.
+
+### The one gap: prereleases
+
+A branch matching `prerelease_branches` **refuses** with a clear error rather than planning. This is
+deliberate and it is the only thing in M1 that is not finished.
+
+Prerelease decoration is not in M1's stated content, but a prerelease branch would otherwise compute a
+*stable* version — a **wrong answer**, not an incomplete one, and a `plan` that lies offline defeats the
+point of it running offline (§Goals 6). Refusing is loud; computing quietly would not be. The refusal is one
+`if` in `cmd_plan`, marked in the source, and deleting it is what lands the feature.
+
+What it needs when picked up, all fully specified already: the counter rule (#63 — reset on a change to the
+base **or** the identifier), monotonicity against the recorded open prerelease (#85), and the anchor staying
+the last *stable* (#61). The versions file already parses the `prerelease` field, so nothing is blocked.
+
+---
+
 ## Constraints that are easy to violate
 
 These are cheap to honour from the start and expensive to retrofit:
@@ -146,6 +202,7 @@ These are cheap to honour from the start and expensive to retrofit:
 | #88 | `initial_version` is required on a package with a `helm` updater, and `Chart.yaml` is still never read back (#75). The requirement exists so cicada never invents a chart's first version |
 | #97 | A derived release still writes a changelog entry. It has no commits, so the body comes from `derived_from` in the notes context — never an empty entry, never a skipped one, and never prose emitted by core |
 | #96 | Releases are created in config order, umbrella last. Deterministic ordering is what makes the forge-call log assertable, and the umbrella's body embeds a manifest describing the releases created before it |
+| #98 | An unknown scope is fatal only on a commit that **can release**. Widening it back to every commit breaks every repo whose dependency bot writes `chore(deps):` — including this design's own worked example (B8/B9). Narrowing it further, so a releasable commit's bad scope is tolerated, is the silent misfiling #11 exists to prevent |
 | #95 | The date is an **input**, never a clock read inside `cicada-core`. It feeds changelog entry dates and nothing else, but an ambient read would make core impure and let `--dry-run` disagree with the run that follows it |
 
 ---
@@ -229,22 +286,29 @@ Four features were removed rather than deferred quietly, and two of them change 
 
 ---
 
-## Next: M1
+## Next: M2
 
-Anchor resolution (per-package ranges, tag reachability), scope routing incl. `default_scope`, bump
-computation (section `bump`, first-release table, `pre_major`, the `maintenance` guard), umbrella
-aggregation, `Plan`. Exit criterion: `cicada plan --json` correct on a fixture **monorepo and a
-single-package repo through the same code path**, fully offline.
+Updaters (cargo, helm, generic path + marker, template), the minijinja notes template with three contexts +
+filters + `template print`, changelog marker insert/create, versions-file **write**, and the `FileEdit`
+boundary. Exit criterion: `release-pr --dry-run` prints exactly the diff it would write; snapshot tests
+green; duplicate-output and re-parse checks fire.
 
-The read half of `GitBackend` that M1 needs is already built and tested — `rev_parse`, `is_ancestor`, `tags`
-— so M1 is core work with no new I/O surface.
+M1 leaves M2 well placed. The `Plan` already carries everything the renderers need — `from`, `to`, `bump`,
+`reason`, `tag`, the routed commits, and `derived_from` (#97) — so M2 is a function from `Plan` to
+`Vec<FileEdit>` with no further computation. Three things to carry in:
 
-`docs/design.md` §Milestones has M1–M8. Two waypoints worth knowing:
+- **`--date` already exists and is already threaded** (#95). It reaches the binary as a value and has exactly
+  one consumer: the date on a changelog entry. Do not let a clock read into `cicada-core` to save passing it.
+- **The `FileEdit` boundary is the point** (#30). Core returns path plus final content; the I/O layer only
+  writes. `--dry-run` must be the identical computation with the write skipped, which H5 asserts directly by
+  comparing the `Vec<FileEdit>` from `--dry-run` and `--no-push`.
+- **`.cicada-versions.toml` gains a writer.** The reader is in `cicada-core/src/versions.rs`; the writer
+  belongs beside it as a pure `VersionsFile -> String`, so the versions file is a `FileEdit` like every other
+  output rather than a special case that bypasses the boundary.
 
-- **M3 is the first genuinely useful build** — `release-pr --no-push` produces a real local release commit
-  you can inspect with `git show`, with no token and no upstream involvement. This is the dogfooding gate;
-  everything before it is theory.
-- **M5 is the first end-to-end release tool**, on GitHub.
+The spike (`spikes/yaml-splice`) is the foundation for the `generic` and `helm` updaters and its two traps —
+char-vs-byte indexing (#71) and tolerating aliases outside the target (#72) — must survive as regression
+tests in the real updater, not only in the spike.
 
 ---
 
