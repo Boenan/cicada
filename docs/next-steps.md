@@ -1,7 +1,23 @@
 # cicada — next steps (handoff)
 
-Written at the end of the design session. Read `docs/design.md` first — this file only says *what to do
-next* and *what is easy to get wrong*.
+A running handoff, updated at the end of each milestone. Read `docs/design.md` first — this file only says
+*where things stand*, *what to do next*, and *what is easy to get wrong*.
+
+---
+
+## Start here
+
+**M0–M7 are complete. 314 tests green, clippy clean.** cicada releases end to end: plan, release PR, tag,
+release object, manifest — on GitHub and GitLab, with prereleases, maintenance lines and monorepos.
+
+Two things are outstanding, and they are independent:
+
+1. **Neither forge adapter has spoken to a live server.** Everything testable without a network is tested;
+   the HTTP itself is unproven. This is the one gate that needs a human with a token — see
+   *Next: verify the adapters* below. It blocks nothing else.
+2. **M8** — musl binaries, multi-arch Docker, and cicada releasing itself. Fully specified, nothing blocking.
+
+Everything the design describes is implemented. Nothing in it is refused by the code.
 
 ---
 
@@ -18,8 +34,12 @@ next* and *what is easy to get wrong*.
 | **M2** | **Done.** Updaters (cargo, helm, generic path + marker, template), templates with three contexts + filters + `template print`, changelog insertion, versions-file write, the `FileEdit` boundary, `release-pr --dry-run` |
 | **M3** | **Done.** The git write path: release PR branch, committer identity, the #32 refusal, the #80 collision check, `--no-push` end to end |
 | **M4** | **Built; one half unverified.** `Forge` trait + GitHub adapter, `GIT_ASKPASS` auth, fetch/push with a lease, the staleness model's forge half. **Real HTTP against github.com is not yet exercised** |
-| **M5** | **Done.** Phase B: tag and release-object reconciliation, the stale-merge and monotonicity guards, the manifest, `cicada run`. 275 tests green |
-| **Production code** | `cicada-core/` (pure) and `cicada/` (lib + bin). Next milestone is M6 |
+| **M5** | **Done.** Phase B: tag and release-object reconciliation, the stale-merge and monotonicity guards, the manifest, `cicada run` |
+| **Prereleases** | **Done.** The gap M1 left is closed: branch-level identifiers, the two-axis counter rule, #85 monotonicity, the skipped changelog, `--prerelease` |
+| **M6** | **Built; live HTTP unverified**, exactly as for GitHub. GitLab REST v4, subgroups, draft-as-title-prefix, prerelease-in-the-name |
+| **M7** | **Done.** `README.md`, the composite action, the GitLab `include:`, and this repo's own workflows — with the adoption claim enforced by tests rather than asserted |
+| **M8** | **Not started.** musl binaries + `SHA256SUMS`, multi-arch Docker with `git`, cicada releasing itself |
+| **Production code** | `cicada-core/` (pure) and `cicada/` (lib + bin). **314 tests green, clippy clean.** Next milestone is M8 |
 
 **The scenario pass rewrote parts of the design.** Decisions #73–#85 all came out of writing expected
 outcomes down, and four earlier decisions were reversed outright — see *Do not re-litigate* below, and note
@@ -166,19 +186,16 @@ What landed, and where:
    offline rehearsal useless exactly where it is wanted. It prints a note when the branch is outside the
    gate, because a `run` that exits 0 silently is worse than a line of output.
 
-### The one gap: prereleases
+### The one gap M1 left — ~~prereleases~~, **closed**
 
-A branch matching `prerelease_branches` **refuses** with a clear error rather than planning. This is
-deliberate and it is the only thing in M1 that is not finished.
+For four milestones a branch matching `prerelease_branches` **refused** rather than planning, because a
+prerelease branch would otherwise have computed a *stable* version — a wrong answer, not an incomplete one,
+and a `plan` that lies offline defeats the point of it running offline (§Goals 6). Refusing was loud;
+computing quietly would not have been.
 
-Prerelease decoration is not in M1's stated content, but a prerelease branch would otherwise compute a
-*stable* version — a **wrong answer**, not an incomplete one, and a `plan` that lies offline defeats the
-point of it running offline (§Goals 6). Refusing is loud; computing quietly would not be. The refusal is one
-`if` in `cmd_plan`, marked in the source, and deleting it is what lands the feature.
-
-What it needs when picked up, all fully specified already: the counter rule (#63 — reset on a change to the
-base **or** the identifier), monotonicity against the recorded open prerelease (#85), and the anchor staying
-the last *stable* (#61). The versions file already parses the `prerelease` field, so nothing is blocked.
+It is implemented now — see *Prereleases: the last gap is closed* below. The note is kept because the
+reasoning generalises: when a feature is not ready, refuse loudly rather than answering wrongly, and leave
+the refusal somewhere a single `if` deletes it.
 
 ---
 
@@ -490,7 +507,6 @@ These are cheap to honour from the start and expensive to retrofit:
 | #94 | Never accept a declared ladder of stages. Ordering comes from semver alone, so an edit that sorts downward (`preview` → `beta`) is an error — a declared order would bless a sequence consumers' resolvers disagree with |
 | #75 | `.cicada-versions.toml` is the **only** source of versions. Never read a version back out of `Cargo.toml` or `Chart.yaml` to seed a computation — it breaks #30 and makes `--dry-run` a lie |
 | #2 | The tag is the **only** anchor. No commit SHA is stored anywhere. A missing tag is a hard error, never a fallback |
-| #78 | The staleness recomputation runs **only** when a tag is about to be created. Unconditionally it fires on every ordinary push after a release |
 | #82 | Branch-*identity* settings are glob patterns matched against the current branch name, never scalars living on the branch. A scalar travels through a merge-back and silently reconfigures the target branch |
 | #39 | No forced versions. A `Release-As:` footer is parsed like any other footer and **ignored** — never honoured, never an error. The maintenance guard has no escape hatch, and adding one is a scope change, not a fix |
 | #88 | `initial_version` is required on a package with a `helm` updater, and `Chart.yaml` is still never read back (#75). The requirement exists so cicada never invents a chart's first version |
@@ -578,9 +594,10 @@ rather than needing a new rule. Recorded in full in `docs/scenarios/single-servi
 | `from` on a first release in `--json` | `"from": null`, present (#89) |
 | Two sub-questions on `Release-As:` | Gone with forced versions (#39) |
 
-## What came out of scope, and why it matters to M1
+## What came out of scope, and why it still matters
 
-Four features were removed rather than deferred quietly, and two of them change what M1 must **not** do:
+Four features were removed rather than deferred quietly. Two of them are things the code must **not** grow
+back, and the temptation to add them recurs every time the guard they removed fires:
 
 - **Forced versions** (#39 → future-work §13). No `Release-As:` footer, no `--release-as`. The bump computed
   from commits and config is the only version there is. A `Release-As:` footer in history is **ignored**, not
