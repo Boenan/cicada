@@ -9,7 +9,7 @@ next* and *what is easy to get wrong*.
 
 | | |
 |---|---|
-| **Design** | Complete. `docs/design.md`, 104 numbered decisions, every section walked and argued through. **No open questions** |
+| **Design** | Complete. `docs/design.md`, 105 numbered decisions, every section walked and argued through. **No open questions** |
 | **Behavioural coverage** | `docs/scenarios/single-service.md` (~140 scenarios, groups A–N) and `docs/scenarios/monorepo.md` (groups O–Y, only what needs N > 1), in five-surface form, doubling as the acceptance suite. Four HTML walkthroughs under `docs/scenarios/single-service/` |
 | **Deferred scope** | `docs/future-work.md`, 16 items, each with why it was deferred and what would trigger it |
 | **M0 spike** | **Done and confirmed.** `spikes/yaml-splice`, 15 tests green |
@@ -417,6 +417,36 @@ rc.2 open, asked for beta         →  exit 4            sorts below it (#85)
 
 ---
 
+## M6 is built
+
+Nine methods against GitLab REST v4. A project is addressed by its **URL-encoded full path**, so
+`group/sub/proj` works with no subgroup handling at all — it is one more slash the encoder already covers.
+Self-hosted instances come through `forge.api_url`, and the changelog's commit and compare links derive the
+**web** host from it (`/api/v4` stripped), because linking a human at the API gives them JSON.
+
+The retry policy (#58) was **extracted rather than copied** into `forge/http.rs`. It is a decision, not an
+implementation detail, and two copies would drift — with the drifted one being whichever nobody was looking
+at.
+
+Two asymmetries, both from #54, both handled where a human will see them:
+
+- **Draft state is the title.** GitLab has no flag; an MR is a draft because its title starts with
+  `Draft: `. Now #105: `PullRequest` carries its title, the adapter **strips before it prefixes** (or a
+  second refusal yields `Draft: Draft: …`, and every one after adds another), and the legacy `WIP: `
+  spelling is stripped too because merge requests carrying it still exist. Not a degradation — GitLab
+  genuinely refuses to merge a draft MR.
+- **Releases have no prerelease flag.** It goes in the release *name* instead, so a tester scanning the
+  releases list can still tell an rc from a stable.
+
+One trap worth naming: a merge request is addressed by **`iid`**, the per-project number a human sees, not
+by `id`, which is global. Using the wrong one addresses somebody else's merge request on a busy instance.
+
+**Live HTTP is unverified**, exactly as for GitHub. Everything testable without a network is tested: URL
+shapes, subgroup encoding, error mapping, draft strip/prefix round-tripping, `iid`-not-`id`, and the
+protocols through the recording fake.
+
+---
+
 ## Constraints that are easy to violate
 
 These are cheap to honour from the start and expensive to retrofit:
@@ -441,6 +471,8 @@ These are cheap to honour from the start and expensive to retrofit:
 | #88 | `initial_version` is required on a package with a `helm` updater, and `Chart.yaml` is still never read back (#75). The requirement exists so cicada never invents a chart's first version |
 | #97 | A derived release still writes a changelog entry. It has no commits, so the body comes from `derived_from` in the notes context — never an empty entry, never a skipped one, and never prose emitted by core |
 | #96 | Releases are created in config order, umbrella last. Deterministic ordering is what makes the forge-call log assertable, and the umbrella's body embeds a manifest describing the releases created before it |
+| #105 | GitLab drafting strips before it prefixes, and a merge request is addressed by `iid`, never `id`. The first stacks `Draft: ` forever; the second addresses a different merge request entirely |
+| #58 | The retry policy lives in `forge/http.rs` and is shared. A second copy in a second adapter drifts, and the drifted one is the one nobody reads |
 | #63 | The prerelease counter resets on a change to the base **or** the identifier. With only the base considered, `alpha.3` → `beta` publishes `beta.4` — a counter continuing across a stage it never belonged to — and #85 does not catch it, because `beta.4` sorts above `alpha.3` |
 | #61 | Prerelease decoration is a **separate pass over the finished stable plan**. Anchor, range and base stay untouched, which is the only reason the notes are cumulative and the stable changelog comes out complete |
 | #104 | `version` in the versions file is optional, and `0.0.0` is never written in its place. An entry with neither key is a parse error, not an empty state |
@@ -537,35 +569,37 @@ Four features were removed rather than deferred quietly, and two of them change 
 
 ---
 
-## Next: verify M4, then M6–M8
+## Next: verify the adapters, then M7–M8
 
-**The outstanding gate is still M4's**, and it has not moved: the GitHub adapter's HTTP has never run. With
-Phase B in place the verification is now a full loop rather than half of one:
+**Both adapters are written and neither has spoken to a live server.** That is now the single outstanding
+gate, and it covers M4 and M6 together:
 
 ```
 CICADA_TOKEN=… cicada run        # on a release branch, with something to release
 ```
 
-Expect to check: the PR opens with the notes as its body; merging it and re-running creates the **tag** and
-the **release object**, with the manifest embedded in the release body; a third run does nothing; and
-hand-editing `cicada/<branch>` drafts the PR, labels it `cicada:stale`, comments, and exits `4`.
+Check the full loop: the PR/MR opens with the notes as its body; merging and re-running creates the **tag**
+and the **release object** with the manifest embedded; a third run does nothing; and hand-editing
+`cicada/<branch>` drafts it, labels it `cicada:stale`, comments, and exits `4`.
 
-The likely failure sites are unchanged — the `head` qualifier on the PR search, the GraphQL mutation shape,
-and error bodies that are not JSON — plus one new one: `create_release` needs the tag to exist on the
-**remote**, so a `--no-push` Phase B followed by a pushed one would fail there rather than locally.
+Likely failure sites, in order of how often adapters get them wrong:
+
+- **GitHub** — the `head` qualifier on the PR search (`owner:branch`), the GraphQL mutation shape for
+  drafting, and error bodies that are not JSON.
+- **GitLab** — `iid` vs `id` anywhere a number is passed back, the `labels` string-vs-array shape on PUT,
+  and `state_event` for closing.
+- **Both** — `create_release` needs the tag on the **remote**, so a `--no-push` Phase B followed by a pushed
+  one fails there rather than locally.
 
 Then:
 
-- **M6** — the GitLab adapter. Nine methods against REST v4, `Draft:` as a title prefix rather than a field
-  (#54), self-hosted through `api_url`, and subgroup paths URL-encoded. `forge::build` already refuses
-  `kind = "gitlab"` by name, which is the seam.
-- **M7** — the shipped CI templates and the docs, including the CI-trigger footgun: the default
-  `GITHUB_TOKEN` does not trigger workflows on PRs it creates, so on an auto-merging repo a PAT or App token
-  is what makes the loop turn at all (§No review gate).
-- **M8** — musl binaries, multi-arch Docker with `git` in it, and cicada releasing itself (#21).
-
-**Nothing in the design is refused by the code any more.** The prerelease gap that stood from M1 through M5
-is closed, so what remains is M6–M8 and M4's verification.
+- **M7** — shipped CI templates (an Actions composite action and a GitLab `include:`) plus the docs,
+  including the CI-trigger footgun: the default `GITHUB_TOKEN` does not trigger workflows on PRs it creates,
+  so on an auto-merging repo a PAT or App token is what makes the loop turn at all (§No review gate).
+  `CI_JOB_TOKEN` has the same problem for MRs. Both templates bake in `fetch-depth: 0` / `GIT_DEPTH: 0` and
+  a concurrency guard, and both call `cicada run` so the phase order cannot be got wrong (#35).
+- **M8** — musl static binaries for x86_64 and aarch64, multi-arch Docker **with `git` in it** (so
+  `scratch` is out, #17), and cicada releasing itself (#21).
 
 ---
 

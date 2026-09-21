@@ -87,6 +87,7 @@ impl FakeForge {
                     number,
                     url: format!("https://forge.invalid/pull/{number}"),
                     draft: false,
+                    title: "chore(release): prepare release".into(),
                     node_id: Some(format!("PR_{number}")),
                 },
             );
@@ -156,6 +157,7 @@ impl Forge for FakeForge {
             number,
             url: format!("https://forge.invalid/pull/{number}"),
             draft: false,
+            title: req.title.clone(),
             node_id: Some(format!("PR_{number}")),
         };
         s.open.insert(req.head.clone(), pr.clone());
@@ -170,7 +172,13 @@ impl Forge for FakeForge {
             .open
             .get(&req.head)
             .cloned()
-            .unwrap_or(PullRequest { number, url: String::new(), draft: false, node_id: None }))
+            .unwrap_or(PullRequest {
+                number,
+                url: String::new(),
+                draft: false,
+                title: req.title.clone(),
+                node_id: None,
+            }))
     }
 
     fn close_pull_request(&self, number: u64) -> Result<(), ForgeError> {

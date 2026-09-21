@@ -194,6 +194,7 @@ adapters cheap instead of a rewrite.
 | 102 | GitHub drafting is a **GraphQL** operation, not a REST field. `draft: true` works when a pull request is created and nowhere else; `PATCH /pulls/{n}` has no such parameter. Staleness layer 2 drafts a PR that already exists, which is precisely the case REST cannot express — so `set_draft` takes the whole `PullRequest` (for its node id) rather than a number, and #54's title-prefix fallback stays reserved for forges where drafting is genuinely unavailable |
 | 103 | Monotonicity (#76) is checked **directly** in Phase B, not inferred from the staleness guard. J4b claims a downward hand-edit trips that guard "with no extra machinery"; it cannot, because #90 selects `prev` from tags *below* the recorded version — editing `1.4.2` down to `1.0.0` leaves no eligible `prev`, so the recomputation becomes a *first release* and `1.0.0` clears it. Phase B therefore refuses when a **reachable stable tag sits above** the recorded version. Reachability is what keeps parallel lines out of it (G6, G10) |
 | 104 | `version` in `.cicada-versions.toml` is **optional**. A line whose *first* release is a prerelease has no last stable at all, and writing `0.0.0` there would be precisely the sentinel #4 refuses — a version that never existed, which anchor resolution would then go looking for a tag for. Absent means absent, and the anchor is unset. An entry with **neither** `version` nor `prerelease` is a parse error: that is what an absent entry says |
+| 105 | `PullRequest` carries its **title**. On GitLab the draft state *is* the title — there is no flag, and `Draft: ` is a prefix the adapter adds and strips (#54) — so setting it needs to know what it is prefixing. The adapter **strips before it prefixes**, or a second refusal produces `Draft: Draft: …` and every one after that adds another |
 
 ---
 
@@ -1414,7 +1415,11 @@ Staleness layer 2 depends on drafting, and the two forges implement it completel
   back is `markPullRequestReadyForReview`. Layer 2 drafts a PR that already exists, so it is always the
   GraphQL path. Historically unavailable on private repos below certain plans.
 - **GitLab** — there is no flag at all. Draft state *is* a `Draft:` prefix on the MR title, so the adapter
-  prefixes and strips a string.
+  prefixes and strips a string. Three consequences worth stating (#105): `PullRequest` has to carry its
+  title, because setting the prefix means knowing what is being prefixed; the adapter **strips before it
+  prefixes**, or repeated refusals stack `Draft: Draft: …` until the title is rejected for length; and the
+  legacy `WIP: ` spelling is stripped too, because merge requests carrying it still exist. This is not a
+  degradation — GitLab genuinely refuses to merge a draft MR, so layer 2 is as enforced there as on GitHub.
 
 Where drafting is unavailable, the fallback is a title prefix plus the `cicada:stale` label plus a failing
 `cicada/freshness` commit status — both forges support statuses, and a required status blocks the merge.
@@ -1654,7 +1659,7 @@ Two sequencing principles, both learned from the decisions above:
 | **M3** | Git write path: release PR branch reset/commit, committer identity, `release_branches` allowlist, templated `release_pr_branch`, `--no-push` end to end. **done** | ✅ **`release-pr --no-push` produces a real local release commit**, inspectable with `git show`, with the working tree untouched (#100). The #32 staleness refusal and the #80 collision check both fire. 216 tests green |
 | **M4** | `Forge` trait (9 methods) + GitHub adapter, upsert by head branch, auth via `GIT_ASKPASS`, retries/error mapping, **staleness model** (committer guard, draft, comment, close on empty plan). **built, one half unverified** | Protocols asserted against a recording fake; fetch/push/lease against a real bare repo; askpass end to end. 251 tests green. **Not yet verified: real HTTP against github.com** — that needs a token and a repo, and is the remaining gate |
 | **M5** | Phase B: tag reconciliation (reachability + collision), **independent release-object reconciliation**, stale-merge detection, release manifest (disk + embedded), `cicada run` ordering. **done**, and **prereleases with it** (#59–#64, #85, #93) | ✅ merge → tag → release; re-run is a no-op; a tag with no release object self-heals; a maintenance branch releases independently of `main`. 275 tests green. Verified end to end locally with `--no-push`; the forge half still rests on the fake (see M4) |
-| **M6** | GitLab adapter (REST v4, draft-as-title-prefix, self-hosted `api_url`) | Same flow green on GitLab |
+| **M6** | GitLab adapter (REST v4, draft-as-title-prefix, self-hosted `api_url`). **built, unverified against a live instance** | Nine methods against REST v4; project addressed by URL-encoded full path so subgroups need nothing special; `Draft:` prefix with strip-before-prefix (#105); prerelease marked in the release name (#54). Retry policy shared with GitHub rather than reimplemented. 302 tests green. **Live HTTP unverified**, exactly as for GitHub |
 | **M7** | Shipped CI templates (Actions composite action, GitLab `include:`), docs incl. the CI-trigger footgun and a worked `cicada.toml` per repo shape | Third party can adopt from the README alone |
 | **M8** | musl static binaries (x86_64, aarch64), multi-arch Docker with `git`, self-release | cicada v0.1.0 released by cicada |
 

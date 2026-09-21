@@ -23,6 +23,8 @@
 pub mod fake;
 pub mod flow;
 pub mod github;
+pub mod gitlab;
+pub mod http;
 
 use cicada_core::config::{Config, ForgeKind};
 
@@ -32,6 +34,12 @@ pub struct PullRequest {
     pub number: u64,
     pub url: String,
     pub draft: bool,
+    /// The title as the forge currently holds it.
+    ///
+    /// Carried because on GitLab the draft state **is** the title: there is no
+    /// flag, and `Draft: ` is a prefix the adapter adds and strips (#54). Setting
+    /// it therefore needs to know what it is prefixing.
+    pub title: String,
     /// GitHub's GraphQL node id, when the adapter has one.
     ///
     /// Present because converting an existing PR to draft is **not** a REST
@@ -132,11 +140,11 @@ pub fn build(
             repo,
             token,
         ))),
-        // M6. Refusing by name beats a half-adapter that fails mid-release.
-        ForgeKind::Gitlab => Err(ForgeError::Http {
-            status: 0,
-            message: "the GitLab adapter lands in M6; `--no-push` works on any forge today".into(),
-        }),
+        ForgeKind::Gitlab => Ok(Box::new(gitlab::GitLab::new(
+            config.forge.api_url.as_deref().unwrap_or("https://gitlab.com/api/v4"),
+            repo,
+            token,
+        ))),
     }
 }
 
@@ -195,5 +203,36 @@ mod tests {
         assert_eq!(backoff(1, None).as_secs(), 2);
         assert_eq!(backoff(2, None).as_secs(), 4);
         assert_eq!(backoff(9, None).as_secs(), 16);
+    }
+}
+
+#[cfg(test)]
+mod build_tests {
+    use super::*;
+
+    fn cfg(kind: &str, api_url: Option<&str>) -> Config {
+        let api = api_url.map(|u| format!("api_url = \"{u}\"\n")).unwrap_or_default();
+        Config::from_toml(&format!(
+            "[settings]\nrelease_branches = [\"main\"]\ndefault_scope = \"a\"\n\
+             [forge]\nkind = \"{kind}\"\n{api}\
+             [packages.a]\npath = \".\"\ntag_format = \"v{{version}}\"\n"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn both_adapters_are_reachable_through_the_configured_kind() {
+        // #66 — `forge.kind` is written by a human and read at runtime; it is
+        // never inferred from the remote URL.
+        assert!(build(&cfg("github", None), "acme/app", "t".into()).is_ok());
+        assert!(build(&cfg("gitlab", None), "group/sub/proj", "t".into()).is_ok());
+    }
+
+    #[test]
+    fn a_self_hosted_api_url_reaches_the_adapter_that_needs_it() {
+        assert!(build(&cfg("github", Some("https://ghe.example/api/v3")), "a/b", "t".into()).is_ok());
+        assert!(
+            build(&cfg("gitlab", Some("https://gitlab.internal/api/v4")), "a/b", "t".into()).is_ok()
+        );
     }
 }
