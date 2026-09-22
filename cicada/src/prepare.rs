@@ -201,15 +201,14 @@ fn inheriting_members(root: &Path, dir: &Path) -> Vec<String> {
                 }
             }
         }
-        if let Ok(src) = std::fs::read_to_string(root.join(rel).join("Cargo.toml")) {
-            if cargo::inherits_workspace_version(&src)
-                && let Some(n) = src
-                    .parse::<toml::Table>()
-                    .ok()
-                    .and_then(|t| Some(t.get("package")?.get("name")?.as_str()?.to_string()))
-            {
-                out.push(n);
-            }
+        if let Ok(src) = std::fs::read_to_string(root.join(rel).join("Cargo.toml"))
+            && cargo::inherits_workspace_version(&src)
+            && let Some(n) = src
+                .parse::<toml::Table>()
+                .ok()
+                .and_then(|t| Some(t.get("package")?.get("name")?.as_str()?.to_string()))
+        {
+            out.push(n);
         }
         for d in dirs {
             // A nested workspace owns what is under it.

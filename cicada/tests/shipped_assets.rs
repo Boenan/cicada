@@ -682,16 +682,55 @@ fn ci_builds_locked_so_a_stale_lockfile_fails_before_the_tag() {
     // silently rewrites the lock in the runner and passes — which is exactly how
     // v0.2.0 reached a tag with a stale lock, and then failed in the artifact
     // build, where `--locked` is used and where failure is far more expensive.
-    let ci = read(".github/workflows/ci.yml");
-    let cargo_runs: Vec<&str> =
-        ci.lines().map(str::trim).filter(|l| l.starts_with("- run: cargo ")).collect();
+    // The rule is about commands that *resolve* dependencies. `cargo audit` reads
+    // the lockfile as its input and takes no such flag, which is the whole point
+    // of it — so the check is per-subcommand rather than "every line saying
+    // cargo", or it fails on the one job that is already doing the right thing.
+    const RESOLVES: [&str; 5] = ["build", "test", "check", "clippy", "run"];
 
-    assert!(!cargo_runs.is_empty(), "ci.yml runs no cargo commands at all");
-    for run in &cargo_runs {
+    let ci = read(".github/workflows/ci.yml");
+    let mut seen = 0;
+    for line in ci.lines().map(str::trim) {
+        let Some(cmd) = line.strip_prefix("- run: cargo ") else { continue };
+        let Some(sub) = cmd.split_whitespace().next() else { continue };
+        if !RESOLVES.contains(&sub) {
+            continue;
+        }
+        seen += 1;
         assert!(
-            run.contains("--locked"),
-            "`{run}` does not pass --locked, so a release commit whose lockfile \
-             was left behind passes CI and fails after the tag"
+            cmd.contains("--locked"),
+            "`cargo {cmd}` does not pass --locked, so a release commit whose \
+             lockfile was left behind passes CI and fails after the tag"
         );
     }
+    assert!(seen >= 3, "only {seen} dependency-resolving cargo commands in ci.yml");
+}
+
+#[test]
+fn the_msrv_is_built_rather_than_asserted() {
+    // `rust-version` is a promise to anyone running `cargo install cicada`, and
+    // it was wrong for several milestones: it said 1.85 while the code had been
+    // using let-chains, stable in 1.88. The install failed with "`let`
+    // expressions in this position are unstable" instead of cargo's clean
+    // "requires rustc 1.88".
+    //
+    // So the manifest and the toolchain CI actually builds with have to agree.
+    let manifest = read("Cargo.toml");
+    let declared = manifest
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("rust-version = "))
+        .expect("the workspace must declare rust-version")
+        .trim()
+        .trim_start_matches('"')
+        .split('"')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains(&format!("dtolnay/rust-toolchain@{declared}")),
+        "Cargo.toml promises rust {declared}, but no CI job builds with that \
+         toolchain — the promise is unverified again"
+    );
 }

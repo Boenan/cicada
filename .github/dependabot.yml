@@ -1,0 +1,34 @@
+# Dependency updates, opened as ordinary pull requests.
+#
+# This is the other half of `--locked`. CI refuses to build a repo whose
+# `Cargo.lock` has drifted from its manifests, which is the correct strictness
+# for a tool whose releases have to be reproducible from a tag — but strictness
+# with no maintenance path means the lock simply rots. Dependabot supplies the
+# path, and every bump it proposes is verified by the same `--locked` build a
+# release uses.
+version: 2
+
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      # Conventional commits are not a style choice in this repo — cicada
+      # computes its own release from them, and `chore` is the type that
+      # contributes no version bump (#36). A dependency bump should not cut a
+      # release on its own; it rides along with the next one that has a reason.
+      #
+      # `deps` names no package, which is exactly the case #98 exists for: an
+      # unknown scope is fatal only on a commit that can release.
+      prefix: chore
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
