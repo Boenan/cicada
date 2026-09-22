@@ -2,6 +2,14 @@
 
 <!-- cicada:insert -->
 
+## 0.2.1 (2026-09-22)
+
+### Bug Fixes
+
+* lock file ([c17ed4b](https://github.com/boenan/cicada/commit/c17ed4bf95c64f67871c56a80899a4e6f05d9eef))
+
+[Compare with 0.2.0](https://github.com/boenan/cicada/compare/v0.2.0...v0.2.1)
+
 ## 0.2.0 (2026-09-22)
 
 ### Features
