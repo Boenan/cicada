@@ -2,6 +2,14 @@
 
 <!-- cicada:insert -->
 
+## 0.2.0 (2026-09-22)
+
+### Features
+
+* Publish binaries & change pr title ([e1c4fbd](https://github.com/boenan/cicada/commit/e1c4fbdf0466944c2eb04037ea4f588a864bfa90))
+
+[Compare with 0.1.0](https://github.com/boenan/cicada/compare/v0.1.0...v0.2.0)
+
 ## 0.1.0 (2026-09-22)
 
 ### Features
