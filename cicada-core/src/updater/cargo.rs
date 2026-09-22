@@ -81,6 +81,60 @@ pub fn verify(path: &str, src: &str) -> Result<(), EditError> {
     })
 }
 
+/// Rewrite the `[[package]]` entries a version bump makes stale in `Cargo.lock`.
+///
+/// **A lockfile is part of the release commit or the release does not build.**
+/// Cargo records every workspace member's own version in `Cargo.lock`, so a
+/// manifest bumped to `0.2.0` against a lock still saying `0.1.0` is a repo where
+/// `cargo build --locked` fails outright — and `--locked` is exactly what a
+/// release artifact build uses, so the failure lands after the tag exists rather
+/// than before.
+///
+/// All the named crates take the same version because that is the only way they
+/// arrive here: either one crate with its own `[package] version`, or the set
+/// that inherits a single `[workspace.package] version` (#24).
+///
+/// A name that is not in the lock is an error rather than a skip. A committed
+/// lockfile that does not know about a workspace member is a broken lockfile, and
+/// releasing from it produces exactly the build failure this exists to prevent.
+pub fn set_lock_versions(
+    path: &str,
+    src: &str,
+    names: &[String],
+    v: &Version,
+) -> Result<String, EditError> {
+    let mut doc = parse(path, src)?;
+    let packages =
+        doc.get_mut("package").and_then(|p| p.as_array_of_tables_mut()).ok_or_else(|| {
+            EditError::Invalid {
+                path: path.to_string(),
+                message: "no `[[package]]` entries — this is not a Cargo.lock".into(),
+            }
+        })?;
+
+    let mut found: Vec<String> = Vec::new();
+    for entry in packages.iter_mut() {
+        let Some(name) = entry.get("name").and_then(|n| n.as_str()).map(str::to_string) else {
+            continue;
+        };
+        if !names.contains(&name) {
+            continue;
+        }
+        if let Some(item) = entry.get_mut("version") {
+            super::toml_path::replace_preserving_decor(item, &v.to_string());
+        }
+        found.push(name);
+    }
+
+    if let Some(missing) = names.iter().find(|n| !found.contains(n)) {
+        return Err(EditError::NotFound {
+            path: path.to_string(),
+            address: format!("[[package]] name = \"{missing}\""),
+        });
+    }
+    Ok(doc.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

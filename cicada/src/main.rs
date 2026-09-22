@@ -623,7 +623,10 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
     // Resolved first: `sources` must read the redirect targets as well as the
     // declared paths.
     let workspace_roots = prepare::workspace_roots(root, cfg, &p.plan);
-    let sources = prepare::sources(root, cfg, &p.plan, &workspace_roots)?;
+    // And the lockfiles, for the same reason one layer down: a manifest bumped
+    // without its `Cargo.lock` is a repo that fails `cargo build --locked`.
+    let lock_targets = prepare::lock_targets(root, cfg, &p.plan, &workspace_roots);
+    let sources = prepare::sources(root, cfg, &p.plan, &workspace_roots, &lock_targets)?;
     let overrides = prepare::overrides(root);
 
     let rendered = cicada_core::render::render(&cicada_core::render::RenderInput {
@@ -634,6 +637,7 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
         links: &links,
         sources: &sources,
         workspace_roots: &workspace_roots,
+        lock_targets: &lock_targets,
         overrides: &overrides,
     })?;
 

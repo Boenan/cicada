@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Advisories land against code that has not changed, so the audit has to run
+    # on a clock rather than on a push.
+    - cron: '17 4 * * 1'
 
 permissions:
   contents: read
@@ -15,8 +19,51 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: cargo test --workspace
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Explicit rather than "whatever the runner image ships", which lags stable
+      # by weeks and changes under you without a commit.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # `--locked` on every cargo invocation, and it is not pedantry. Cargo
+      # records each workspace member's own version in Cargo.lock, so a release
+      # commit that bumps the manifests and not the lock yields a repo where
+      # `cargo build --locked` refuses — and a tag in that state is broken for
+      # everyone, not just for this CI: `cargo install --locked` fails on it too.
+      #
+      # Without the flag cargo quietly rewrites the lock in the runner and this
+      # job goes green. That is exactly how v0.2.0 reached a tag with a stale
+      # lock and shipped with no binaries.
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  msrv:
+    # `rust-version` in Cargo.toml is a promise to anyone running
+    # `cargo install cicada`, and nothing was keeping it. It said 1.85 while the
+    # code had used let-chains — stable in 1.88 — for several milestones, so an
+    # install on 1.85 failed with "`let` expressions in this position are
+    # unstable" rather than cargo's clean "requires rustc 1.88".
+    #
+    # A claim checked only by reading is a claim that rots (the same argument
+    # `shipped_assets.rs` makes about the README), so it is built here instead.
+    name: "msrv: 1.88"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets --locked
+
+  audit:
+    # Advisories against dependencies of a binary people install. `--locked` is
+    # what makes this meaningful: the graph audited here is the graph a release
+    # is built from, not whatever resolved this morning.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit --deny warnings
 
   check:
     # Lints the pull request's commits before they land (#12, G2c). No token, no
@@ -27,7 +74,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: cargo build --release -p cicada
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p cicada --locked
       - run: |
           ./target/release/cicada check \
             --base "origin/${{ github.base_ref }}" \

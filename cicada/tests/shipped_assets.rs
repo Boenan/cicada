@@ -674,3 +674,102 @@ fn the_moving_major_tag_the_readme_relies_on_is_published() {
         "the tag filter would let the moving tags re-enter this workflow"
     );
 }
+
+#[test]
+fn ci_builds_locked_so_a_stale_lockfile_fails_before_the_tag() {
+    // The release commit bumps Cargo.toml *and* Cargo.lock, and the only thing
+    // that proves they agree is a build with `--locked`. Without the flag cargo
+    // silently rewrites the lock in the runner and passes — which is exactly how
+    // v0.2.0 reached a tag with a stale lock, and then failed in the artifact
+    // build, where `--locked` is used and where failure is far more expensive.
+    // The rule is about commands that *resolve* dependencies. `cargo audit` reads
+    // the lockfile as its input and takes no such flag, which is the whole point
+    // of it — so the check is per-subcommand rather than "every line saying
+    // cargo", or it fails on the one job that is already doing the right thing.
+    const RESOLVES: [&str; 5] = ["build", "test", "check", "clippy", "run"];
+
+    let ci = read(".github/workflows/ci.yml");
+    let mut seen = 0;
+    for line in ci.lines().map(str::trim) {
+        let Some(cmd) = line.strip_prefix("- run: cargo ") else { continue };
+        let Some(sub) = cmd.split_whitespace().next() else { continue };
+        if !RESOLVES.contains(&sub) {
+            continue;
+        }
+        seen += 1;
+        assert!(
+            cmd.contains("--locked"),
+            "`cargo {cmd}` does not pass --locked, so a release commit whose \
+             lockfile was left behind passes CI and fails after the tag"
+        );
+    }
+    assert!(seen >= 3, "only {seen} dependency-resolving cargo commands in ci.yml");
+}
+
+#[test]
+fn the_msrv_is_built_rather_than_asserted() {
+    // `rust-version` is a promise to anyone running `cargo install cicada`, and
+    // it was wrong for several milestones: it said 1.85 while the code had been
+    // using let-chains, stable in 1.88. The install failed with "`let`
+    // expressions in this position are unstable" instead of cargo's clean
+    // "requires rustc 1.88".
+    //
+    // So the manifest and the toolchain CI actually builds with have to agree.
+    let manifest = read("Cargo.toml");
+    let declared = manifest
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("rust-version = "))
+        .expect("the workspace must declare rust-version")
+        .trim()
+        .trim_start_matches('"')
+        .split('"')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains(&format!("dtolnay/rust-toolchain@{declared}")),
+        "Cargo.toml promises rust {declared}, but no CI job builds with that \
+         toolchain — the promise is unverified again"
+    );
+}
+
+#[test]
+fn every_job_that_builds_states_which_rust_it_builds_with() {
+    // A job with no toolchain step runs whatever Rust the runner image happens
+    // to ship. That lags stable by weeks, and it changes underneath the repo
+    // with no commit to point at — so "which compiler produced this binary?" has
+    // no answer, and a toolchain regression looks like a code regression.
+    //
+    // `rust-version` is the floor and is checked elsewhere; this is the ceiling,
+    // and every build wants to be on current stable.
+    for asset in [
+        ".github/workflows/ci.yml",
+        ".github/workflows/artifacts.yml",
+        ".github/workflows/release.yml",
+    ] {
+        let src = read(asset);
+        let builds = src
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.contains("cargo build") || l.contains("cargo test"))
+            .count();
+        if builds == 0 {
+            continue;
+        }
+        assert!(
+            src.contains("dtolnay/rust-toolchain@"),
+            "{asset} builds with cargo but pins no toolchain, so it uses whatever \
+             the runner image ships"
+        );
+    }
+
+    // And the musl target comes from the same pin rather than a separate rustup
+    // call that could name a different toolchain's target set.
+    let artifacts = read(".github/workflows/artifacts.yml");
+    assert!(
+        !artifacts.contains("rustup target add"),
+        "the cross target should come from the toolchain action's `targets:`"
+    );
+}
