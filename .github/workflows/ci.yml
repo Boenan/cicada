@@ -15,8 +15,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: cargo test --workspace
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # `--locked` is not pedantry here, it is the gate that was missing. Cargo
+      # records every workspace member's own version in Cargo.lock, so a release
+      # commit that bumps the manifests and not the lock produces a repo which
+      # fails `cargo build --locked` — and the only build passing that flag was
+      # the artifact build, which runs *after* the tag exists. v0.2.0 was cut
+      # that way: this job went green, and the release had no binaries.
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   check:
     # Lints the pull request's commits before they land (#12, G2c). No token, no
@@ -27,7 +33,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: cargo build --release -p cicada
+      - run: cargo build --release -p cicada --locked
       - run: |
           ./target/release/cicada check \
             --base "origin/${{ github.base_ref }}" \

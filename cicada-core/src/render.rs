@@ -50,9 +50,28 @@ pub struct RenderInput<'a> {
     /// that actually holds the number (#24). Finding it means walking the tree, so
     /// the binary resolves it and passes the answer in.
     pub workspace_roots: &'a BTreeMap<String, String>,
+    /// For a cargo updater, the `Cargo.lock` a bump makes stale and the crates in
+    /// it that move — keyed by the updater's declared path. Same division of
+    /// labour as `workspace_roots`: enumerating the workspace members that
+    /// inherit a version means walking the tree, so the binary answers it.
+    ///
+    /// Absent when the repo commits no lockfile, which is ordinary for a library.
+    pub lock_targets: &'a BTreeMap<String, LockTarget>,
     /// Template overrides picked up from `.cicada/templates/<name>.j2` (#47),
     /// keyed by built-in name.
     pub overrides: &'a BTreeMap<String, String>,
+}
+
+/// A `Cargo.lock` and the crates in it a single bump makes stale.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockTarget {
+    /// Repo-relative path to the lockfile.
+    pub path: String,
+    /// Every crate whose recorded version this bump changes. More than one when
+    /// the members inherit `[workspace.package] version` (#24) — bumping that one
+    /// key moves all of them, and a lock that records only some of the new
+    /// numbers fails `--locked` just as surely as one that records none.
+    pub crates: Vec<String>,
 }
 
 pub struct Rendered {
@@ -202,6 +221,36 @@ pub fn render(input: &RenderInput<'_>) -> Result<Rendered, EditError> {
                 target_path,
                 (out.content, EditSource::Updater { package: r.name.clone(), kind: kind_str(u.kind) }),
             );
+
+            // The lockfile moves with the manifest or the release does not build
+            // under `--locked`. Folded like any other edit (#99), so a monorepo
+            // whose packages share one lock accumulates into a single `FileEdit`
+            // rather than the last writer winning.
+            if u.kind == UpdaterKind::Cargo
+                && let Some(lock) = input.lock_targets.get(declared)
+            {
+                let current = match pending.get(&lock.path) {
+                    Some((c, _)) => c.clone(),
+                    None => input.sources.get(&lock.path).cloned().ok_or_else(|| {
+                        EditError::NotFound {
+                            path: lock.path.clone(),
+                            address: "the file itself".into(),
+                        }
+                    })?,
+                };
+                let content =
+                    updater::cargo::set_lock_versions(&lock.path, &current, &lock.crates, &r.to)?;
+                pending.insert(
+                    lock.path.clone(),
+                    (
+                        content,
+                        EditSource::Updater {
+                            package: r.name.clone(),
+                            kind: kind_str(u.kind),
+                        },
+                    ),
+                );
+            }
         }
     }
 

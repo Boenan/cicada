@@ -12,7 +12,7 @@ use cicada_core::config::{Config, ForgeKind, UpdaterKind};
 use cicada_core::edit::FileEdit;
 use cicada_core::notes::LinkStyle;
 use cicada_core::plan::Plan;
-use cicada_core::render::required_sources;
+use cicada_core::render::{LockTarget, required_sources};
 use cicada_core::template;
 use cicada_core::updater::cargo;
 
@@ -27,6 +27,7 @@ pub fn sources(
     config: &Config,
     plan: &Plan,
     workspace_roots: &BTreeMap<String, String>,
+    lock_targets: &BTreeMap<String, LockTarget>,
 ) -> std::io::Result<BTreeMap<String, String>> {
     let mut out = BTreeMap::new();
     let mut wanted = required_sources(config, plan);
@@ -37,6 +38,12 @@ pub fn sources(
     for target in workspace_roots.values() {
         if !wanted.contains(target) {
             wanted.push(target.clone());
+        }
+    }
+    // Same reason, one layer down: the lockfile is edited, so it has to be read.
+    for lock in lock_targets.values() {
+        if !wanted.contains(&lock.path) {
+            wanted.push(lock.path.clone());
         }
     }
     for rel in wanted {
@@ -95,6 +102,132 @@ pub fn workspace_roots(root: &Path, config: &Config, plan: &Plan) -> BTreeMap<St
             }
         }
     }
+    out
+}
+
+/// For every cargo updater, the `Cargo.lock` its bump makes stale and the crates
+/// in it that move (#24 again, one layer down).
+///
+/// Cargo records each workspace member's own version in the lock, so bumping a
+/// manifest without the lock leaves a repo that fails `cargo build --locked` —
+/// and a release artifact build is precisely where `--locked` gets used, so the
+/// failure surfaces *after* the tag exists.
+///
+/// Two cases, and the second is the one that bites: a crate with its own
+/// `[package] version` moves alone, but a crate that inherits moves every other
+/// member that inherits too, because they all read the one
+/// `[workspace.package] version`. cicada's own repo is the second kind —
+/// `cicada` and `cicada-core` both inherit — so fixing only the declared crate
+/// would still not build.
+pub fn lock_targets(
+    root: &Path,
+    config: &Config,
+    plan: &Plan,
+    workspace_roots: &BTreeMap<String, String>,
+) -> BTreeMap<String, LockTarget> {
+    let mut out = BTreeMap::new();
+    for r in &plan.releases {
+        let cicada_core::config::Target::Package(id) = r.target else { continue };
+        let Some((_, pkg)) = config.packages.get_index(id.0) else { continue };
+        for u in &pkg.updaters {
+            if u.kind != UpdaterKind::Cargo {
+                continue;
+            }
+            let Some(declared) = u.path.as_deref() else { continue };
+
+            // The lock lives beside the workspace root when there is one, and
+            // beside the manifest otherwise.
+            let anchor = workspace_roots
+                .get(declared)
+                .cloned()
+                .or_else(|| find_workspace_root(root, Path::new(declared)))
+                .unwrap_or_else(|| declared.to_string());
+            let dir = Path::new(&anchor).parent().unwrap_or(Path::new(""));
+            let lock = dir.join("Cargo.lock");
+            if !root.join(&lock).is_file() {
+                // No committed lockfile. Ordinary for a library, and nothing to
+                // keep in step.
+                continue;
+            }
+
+            let crates = if workspace_roots.contains_key(declared) {
+                inheriting_members(root, dir)
+            } else {
+                crate_name(root, Path::new(declared)).into_iter().collect()
+            };
+            if crates.is_empty() {
+                continue;
+            }
+            out.insert(
+                declared.to_string(),
+                LockTarget { path: lock.to_string_lossy().to_string(), crates },
+            );
+        }
+    }
+    out
+}
+
+/// `[package] name` from a manifest.
+fn crate_name(root: &Path, manifest: &Path) -> Option<String> {
+    let src = std::fs::read_to_string(root.join(manifest)).ok()?;
+    let t: toml::Table = src.parse().ok()?;
+    t.get("package")?.get("name")?.as_str().map(str::to_string)
+}
+
+/// Every crate under a workspace root that takes its version from it.
+///
+/// Found by walking rather than by resolving the `members` globs, because a
+/// manifest saying `version.workspace = true` is already the answer — cargo
+/// rejects it in a crate that is not a member, so the property is self-proving
+/// and needs no glob engine.
+///
+/// The walk stops at a nested `[workspace]`: `spikes/` in this very repo carries
+/// its own, and its crates belong to it rather than to the root.
+fn inheriting_members(root: &Path, dir: &Path) -> Vec<String> {
+    fn walk(root: &Path, rel: &Path, depth: usize, out: &mut Vec<String>) {
+        if depth > 8 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(root.join(rel)) else { return };
+        let mut dirs = Vec::new();
+        for e in entries.flatten() {
+            let name = e.file_name();
+            let name = name.to_string_lossy().to_string();
+            if e.path().is_dir() {
+                // Build output and VCS internals hold no manifests worth reading,
+                // and `target/` holds thousands.
+                if !name.starts_with('.') && name != "target" && name != "node_modules" {
+                    dirs.push(rel.join(&name));
+                }
+            }
+        }
+        if let Ok(src) = std::fs::read_to_string(root.join(rel).join("Cargo.toml")) {
+            if cargo::inherits_workspace_version(&src)
+                && let Some(n) = src
+                    .parse::<toml::Table>()
+                    .ok()
+                    .and_then(|t| Some(t.get("package")?.get("name")?.as_str()?.to_string()))
+            {
+                out.push(n);
+            }
+        }
+        for d in dirs {
+            // A nested workspace owns what is under it.
+            let nested = std::fs::read_to_string(root.join(&d).join("Cargo.toml"))
+                .ok()
+                .and_then(|s| s.parse::<toml::Table>().ok())
+                .is_some_and(|t| t.contains_key("workspace"));
+            if nested {
+                continue;
+            }
+            walk(root, &d, depth + 1, out);
+        }
+    }
+
+    let mut out = Vec::new();
+    walk(root, dir, 0, &mut out);
+    out.sort();
+    out.dedup();
     out
 }
 

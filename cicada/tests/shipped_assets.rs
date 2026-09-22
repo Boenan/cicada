@@ -674,3 +674,24 @@ fn the_moving_major_tag_the_readme_relies_on_is_published() {
         "the tag filter would let the moving tags re-enter this workflow"
     );
 }
+
+#[test]
+fn ci_builds_locked_so_a_stale_lockfile_fails_before_the_tag() {
+    // The release commit bumps Cargo.toml *and* Cargo.lock, and the only thing
+    // that proves they agree is a build with `--locked`. Without the flag cargo
+    // silently rewrites the lock in the runner and passes — which is exactly how
+    // v0.2.0 reached a tag with a stale lock, and then failed in the artifact
+    // build, where `--locked` is used and where failure is far more expensive.
+    let ci = read(".github/workflows/ci.yml");
+    let cargo_runs: Vec<&str> =
+        ci.lines().map(str::trim).filter(|l| l.starts_with("- run: cargo ")).collect();
+
+    assert!(!cargo_runs.is_empty(), "ci.yml runs no cargo commands at all");
+    for run in &cargo_runs {
+        assert!(
+            run.contains("--locked"),
+            "`{run}` does not pass --locked, so a release commit whose lockfile \
+             was left behind passes CI and fails after the tag"
+        );
+    }
+}

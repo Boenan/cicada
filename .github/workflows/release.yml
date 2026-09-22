@@ -65,7 +65,7 @@ jobs:
       - name: Build cicada from source (self-release bootstrap)
         run: |
           set -euo pipefail
-          cargo build --release -p cicada
+          cargo build --release -p cicada --locked
           echo "${PWD}/target/release" >> "$GITHUB_PATH"
 
       - uses: ./

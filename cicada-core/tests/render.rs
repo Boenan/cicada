@@ -90,6 +90,7 @@ struct Case {
     sources: BTreeMap<String, String>,
     overrides: BTreeMap<String, String>,
     workspace_roots: BTreeMap<String, String>,
+    lock_targets: BTreeMap<String, cicada_core::render::LockTarget>,
     links: LinkStyle,
     date: String,
 }
@@ -102,6 +103,7 @@ impl Case {
             sources: BTreeMap::new(),
             overrides: BTreeMap::new(),
             workspace_roots: BTreeMap::new(),
+            lock_targets: BTreeMap::new(),
             links: LinkStyle::default(),
             date: "2026-09-21".into(),
         }
@@ -121,6 +123,22 @@ impl Case {
         self.run_pre(subjects, None)
     }
 
+    /// For the cases whose point is that render refuses.
+    fn try_run(&self, subjects: &[&str]) -> Result<Rendered, cicada_core::edit::EditError> {
+        let p = make_plan_pre(&self.config, &self.versions, &commits(subjects), None);
+        render(&RenderInput {
+            config: &self.config,
+            plan: &p,
+            versions: &self.versions,
+            date: &self.date,
+            links: &self.links,
+            sources: &self.sources,
+            workspace_roots: &self.workspace_roots,
+            lock_targets: &self.lock_targets,
+            overrides: &self.overrides,
+        })
+    }
+
     fn run_pre(&self, subjects: &[&str], identifier: Option<&str>) -> Rendered {
         let p = make_plan_pre(&self.config, &self.versions, &commits(subjects), identifier);
         render(&RenderInput {
@@ -131,6 +149,7 @@ impl Case {
             links: &self.links,
             sources: &self.sources,
             workspace_roots: &self.workspace_roots,
+            lock_targets: &self.lock_targets,
             overrides: &self.overrides,
         })
         .unwrap_or_else(|e| panic!("render failed: {e}"))
@@ -384,6 +403,7 @@ fn a_breaking_change_gets_its_own_section_with_the_footers_explanation() {
         links: &case.links,
         sources: &case.sources,
         workspace_roots: &case.workspace_roots,
+        lock_targets: &case.lock_targets,
         overrides: &case.overrides,
     })
     .unwrap();
@@ -573,4 +593,97 @@ fn f7_the_notes_are_cumulative_even_though_no_changelog_was_written() {
     let body = r.notes.get(&Target::Package(PackageId(0))).expect("notes for the rc");
     assert!(body.contains("add export"), "{body}");
     assert!(body.contains("handle nil"), "{body}");
+}
+
+// --- the lockfile moves with the manifest --------------------------------
+
+#[test]
+fn a_cargo_bump_takes_the_lockfile_with_it() {
+    // Found the hard way, on the 0.2.0 release: the manifest went to 0.2.0, the
+    // lock kept saying 0.1.0, and `cargo build --locked` refused — after the tag
+    // existed, because `--locked` is what an artifact build uses and nothing
+    // before it had passed the flag.
+    const LOCK: &str = r#"version = 4
+
+[[package]]
+name = "app"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "app-core"
+version = "0.1.0"
+
+[[package]]
+name = "serde"
+version = "1.0.200"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+"#;
+
+    let mut c = Case::new(SHAPE_1).source("Cargo.toml", CARGO);
+    c.sources.insert("Cargo.lock".into(), LOCK.into());
+    c.lock_targets.insert(
+        "Cargo.toml".into(),
+        cicada_core::render::LockTarget {
+            path: "Cargo.lock".into(),
+            // Both, because both inherit one `[workspace.package] version` (#24).
+            // Moving only the declared crate leaves the build just as broken.
+            crates: vec!["app".into(), "app-core".into()],
+        },
+    );
+
+    let out = c.run(&["feat: a"]);
+    let lock = out
+        .edits
+        .iter()
+        .find(|e| e.path == "Cargo.lock")
+        .expect("the lockfile must be part of the release commit");
+
+    assert!(lock.content.contains("name = \"app\"\nversion = \"1.5.0\""));
+    assert!(lock.content.contains("name = \"app-core\"\nversion = \"1.5.0\""));
+    // A registry dependency is not ours to move. Touching it would be a silent
+    // dependency change smuggled into a release commit.
+    assert!(
+        lock.content.contains("name = \"serde\"\nversion = \"1.0.200\""),
+        "a dependency's pinned version must survive untouched:\n{}",
+        lock.content
+    );
+    // `version = 4` at the top is the lock format, not a package.
+    assert!(lock.content.starts_with("version = 4"), "{}", lock.content);
+}
+
+#[test]
+fn a_repo_that_commits_no_lockfile_is_left_alone() {
+    // Ordinary for a library. No lock target, no edit, and nothing invented.
+    let c = Case::new(SHAPE_1).source("Cargo.toml", CARGO);
+    let out = c.run(&["feat: a"]);
+    assert!(
+        !out.edits.iter().any(|e| e.path.ends_with("Cargo.lock")),
+        "nothing should have written a lockfile"
+    );
+}
+
+#[test]
+fn a_lockfile_missing_the_crate_is_an_error_rather_than_a_silent_skip() {
+    // A committed lock that does not know about a workspace member is broken, and
+    // releasing from it produces exactly the `--locked` failure this prevents.
+    let mut c = Case::new(SHAPE_1).source("Cargo.toml", CARGO);
+    c.sources.insert(
+        "Cargo.lock".into(),
+        "version = 4\n\n[[package]]\nname = \"other\"\nversion = \"1.0.0\"\n".into(),
+    );
+    c.lock_targets.insert(
+        "Cargo.toml".into(),
+        cicada_core::render::LockTarget {
+            path: "Cargo.lock".into(),
+            crates: vec!["app".into()],
+        },
+    );
+    let Err(err) = c.try_run(&["feat: a"]) else {
+        panic!("a lockfile missing the crate must refuse, not write a half-correct lock");
+    };
+    let msg = format!("{err:?}");
+    assert!(msg.contains("app"), "the error must name the crate it could not find: {msg}");
 }
