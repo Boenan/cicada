@@ -483,3 +483,25 @@ fn the_checkout_does_not_hand_cicada_someone_elses_credentials() {
         );
     }
 }
+
+#[test]
+fn every_gh_step_knows_which_repository_it_is_talking_about() {
+    // `gh` infers the repository from the git remote, and the job that uploads
+    // release assets has no checkout — nothing to infer from. Without `GH_REPO`
+    // every call fails with "failed to determine base repo", which the retry loop
+    // around it then reports as a five-minute timeout waiting for a release that
+    // was there the whole time.
+    //
+    // The invariant is a pairing: a step that needs `GH_TOKEN` is a step running
+    // `gh`, and every such step needs `GH_REPO` beside it.
+    let workflow = read(".github/workflows/artifacts.yml");
+    let tokens = workflow.matches("GH_TOKEN:").count();
+    let repos = workflow.matches("GH_REPO:").count();
+
+    assert!(tokens > 0, "the workflow no longer authenticates gh at all");
+    assert_eq!(
+        tokens, repos,
+        "{tokens} step(s) set GH_TOKEN but only {repos} set GH_REPO — a gh step \
+         without GH_REPO fails to find the repository, and fails slowly"
+    );
+}
