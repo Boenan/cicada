@@ -122,6 +122,14 @@ jobs:
             exit 1
           fi
 
+      # Separated so a test can execute this block whole rather than pick lines
+      # out of it — see `the_executable_bit_survives_the_trip_to_a_users_disk`.
+      - name: Package
+        id: package
+        run: |
+          set -euo pipefail
+          bin="target/${{ matrix.target }}/release/cicada"
+
           # The tarball is the unit of publication, and it is built *here*
           # rather than in a later job because the executable bit does not
           # survive any other route. GitHub release assets carry no permissions,
@@ -129,9 +137,20 @@ jobs:
           # at the far end non-executable, and anyone who downloads it by hand
           # gets "Permission denied". Inside a tar the mode is recorded and
           # travels intact.
-          install -m755 "$bin" cicada
-          tar czf "cicada-${{ matrix.target }}.tar.gz" cicada
-          ./cicada --version
+          #
+          # Staged in a directory of its own, and that is not tidiness. The
+          # repository root already contains a `cicada` **directory** — the
+          # crate — so `install … cicada` from here writes *into* it, `tar`
+          # archives the source tree instead of the binary, and the check below
+          # fails with "./cicada: Is a directory".
+          rm -rf dist && mkdir -p dist
+          install -m755 "$bin" dist/cicada
+
+          # `-C dist` keeps the archive flat: one `cicada` at its root, which is
+          # what `action.yml` and the README both extract.
+          tar czf "cicada-${{ matrix.target }}.tar.gz" -C dist cicada
+
+          dist/cicada --version
           tar tvzf "cicada-${{ matrix.target }}.tar.gz"
 
       - uses: actions/upload-artifact@v4

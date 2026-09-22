@@ -525,18 +525,20 @@ fn the_executable_bit_survives_the_trip_to_a_users_disk() {
     // chmod-ed by whoever downloads it. That worked for the action, which chmods,
     // and failed for every human following the README.
     //
-    // tar records the mode, so this is a property of the pack/unpack commands in
-    // those two files, and both are executed here rather than described.
+    // The workflow's whole packaging step runs here, rather than two lines picked
+    // out of it. The first version of this test picked lines and ran them in an
+    // empty scratch directory — and passed while the real step was broken, because
+    // the repository root holds a `cicada` **directory**: `install … cicada` wrote
+    // inside it, tar archived the source tree, and the step died with
+    // "./cicada: Is a directory". The hazard was absent from the only place it was
+    // being tested.
+    //
+    // It is reproduced below.
     let workflow = read(".github/workflows/artifacts.yml");
     let action = read("action.yml");
     let target = &published_targets(&workflow)[0];
 
-    let pack = workflow
-        .lines()
-        .find(|l| l.contains("tar czf"))
-        .expect("the workflow must still build the archive")
-        .trim()
-        .replace("${{ matrix.target }}", target);
+    let package = run_block(&workflow, "package").replace("${{ matrix.target }}", target);
     let unpack = action
         .lines()
         .find(|l| l.contains("tar xzf"))
@@ -544,18 +546,15 @@ fn the_executable_bit_survives_the_trip_to_a_users_disk() {
         .trim()
         .to_string();
 
-    // The mode is set once, where the binary is built — and that line is taken
-    // from the workflow too, so dropping it there fails here rather than only
-    // being noticed by a reader.
-    let stage = workflow
-        .lines()
-        .find(|l| l.trim_start().starts_with("install -"))
-        .expect("the workflow must still set the executable bit before packing")
-        .trim()
-        .to_string();
-
     let src = scratch("tar-src");
-    std::fs::write(src.join("built"), "#!/bin/sh\necho hi\n").unwrap();
+    let built = src.join(format!("target/{target}/release"));
+    std::fs::create_dir_all(&built).unwrap();
+    std::fs::write(built.join("cicada"), "#!/bin/sh\necho 'cicada 9.9.9'\n").unwrap();
+
+    // A directory named exactly like the binary, as the real repo root has.
+    std::fs::create_dir_all(src.join("cicada/src")).unwrap();
+    std::fs::write(src.join("cicada/src/main.rs"), "fn main() {}\n").unwrap();
+
     let sh = |script: &str, dir: &Path| {
         std::process::Command::new("bash")
             .arg("-c")
@@ -565,29 +564,44 @@ fn the_executable_bit_survives_the_trip_to_a_users_disk() {
             .expect("bash")
     };
 
-    let out = sh(&format!("bin=built ; {stage}"), &src);
-    assert!(out.status.success(), "staging: {}", String::from_utf8_lossy(&out.stderr));
+    let out = sh(&package, &src);
+    assert!(
+        out.status.success(),
+        "packaging failed in a tree shaped like this repo:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
 
-    let out = sh(&pack, &src);
-    assert!(out.status.success(), "packing: {}", String::from_utf8_lossy(&out.stderr));
-
-    let dst = scratch("tar-dst");
     let asset = format!("cicada-{target}.tar.gz");
-    std::fs::copy(src.join(&asset), dst.join(&asset)).unwrap();
+    let dst = scratch("tar-dst");
+    std::fs::copy(src.join(&asset), dst.join(&asset))
+        .unwrap_or_else(|e| panic!("the workflow produced no {asset}: {e}"));
 
-    // The action's own extraction line, with the variables it reads supplied.
     let script = format!("tmp={} ; asset={asset} ; {unpack}", dst.display());
     let out = sh(&script, &dst);
     assert!(out.status.success(), "unpacking: {}", String::from_utf8_lossy(&out.stderr));
 
+    let meta = std::fs::metadata(dst.join("cicada")).expect("the archive must hold a `cicada`");
+    assert!(
+        meta.is_file(),
+        "the archive's `cicada` is a directory — the source tree got packaged \
+         instead of the binary, which is what shipping from the repo root does"
+    );
+
     use std::os::unix::fs::PermissionsExt;
-    let mode = std::fs::metadata(dst.join("cicada")).unwrap().permissions().mode();
+    let mode = meta.permissions().mode();
     assert_eq!(
         mode & 0o111,
         0o111,
         "the extracted cicada is not executable (mode {mode:o}) — the archive did not \
          carry the bit, which is the only reason it is an archive"
     );
+
+    // Flat, no wrapping directory: `action.yml` and the README both extract
+    // straight into place and expect `cicada` at the root.
+    let out = sh(&format!("tar tzf {asset}"), &dst);
+    let listing = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(listing.trim(), "cicada", "exactly one flat entry:\n{listing}");
 
     let _ = std::fs::remove_dir_all(&src);
     let _ = std::fs::remove_dir_all(&dst);
