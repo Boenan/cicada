@@ -1,0 +1,68 @@
+# The shipped GitLab CI template (design §Distribution).
+#
+#   include:
+#     - remote: https://raw.githubusercontent.com/boenan/cicada/v1/ci/gitlab-ci.yml
+#
+# A **static asset**, not a rendered template. Two things are provided: a hidden
+# `.cicada` job to extend, and a concrete `cicada:release` job that works as-is.
+#
+# Both of the settings that are easy to forget are baked in:
+#
+#   GIT_DEPTH: 0     a shallow clone truncates history, so a changelog computed
+#                    from it would be silently incomplete. cicada detects this
+#                    and errors (§H8) rather than guessing, but the error is one
+#                    nobody should have to see.
+#   resource_group   two overlapping runs race on the force-push. The race is
+#                    self-correcting — whichever lands second leaves the branch a
+#                    pure function of the target branch's tip — but the wasted
+#                    work is avoidable.
+
+variables:
+  # Override to pin a version. `latest` is convenient and reproducible only by
+  # accident; pin this in anything you rely on.
+  CICADA_IMAGE: ghcr.io/boenan/cicada:v1
+
+.cicada:
+  image: $CICADA_IMAGE
+  variables:
+    # Full history, or the changelog is wrong (#H8).
+    GIT_DEPTH: 0
+  resource_group: cicada-release
+  # `cicada run` is Phase B then Phase A, in that order (#35). Both phases fire
+  # on the same event, so the order is CI's to get wrong and getting it wrong is
+  # silent — this job exists so a pipeline cannot express the broken one.
+  script:
+    - cicada run
+
+# The job most repositories want. Extend `.cicada` instead if you need to change
+# the rules, the stage, or the command.
+cicada:release:
+  extends: .cicada
+  stage: deploy
+  rules:
+    # Branch-gated, never event-gated. cicada decides for itself whether a branch
+    # is one it may release from (`release_branches`, #26) and exits 0 quietly
+    # otherwise, so this rule only needs to keep the job off merge-request
+    # pipelines, where the source branch is not what is being released.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+    - if: $CI_COMMIT_BRANCH
+  variables:
+    # A Project Access Token with Maintainer role and the `api` +
+    # `write_repository` scopes (§Permissions).
+    #
+    # NOT `CI_JOB_TOKEN`: merge requests it creates do not trigger pipelines, so
+    # the release MR's checks never start and it sits open looking healthy.
+    CICADA_TOKEN: $CICADA_TOKEN
+
+# Linting a merge request's commits before they land (#12, G2c). Needs no token
+# and makes no network call, so it is safe on a fork's pipeline.
+cicada:check:
+  image: $CICADA_IMAGE
+  stage: test
+  variables:
+    GIT_DEPTH: 0
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - cicada check --base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --head "$CI_COMMIT_SHA"

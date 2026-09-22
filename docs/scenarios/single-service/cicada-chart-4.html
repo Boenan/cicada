@@ -1,0 +1,570 @@
+<title>Cicada App and Chart</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;500&display=swap">
+
+<style>
+:root{
+  --ground:#F1F3F0; --surface:#FBFCFA; --surface-2:#E7EBE6;
+  --ink:#17201D; --ink-soft:#5C665F; --ink-faint:#8D968F;
+  --rule:#D4DAD2; --accent:#146A5E; --accent-deep:#0E4E45;
+  --accent-soft:#DCEBE6; --warn:#8C5416; --warn-soft:#F2E8D8;
+  --on-accent:#F1F3F0;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#101413; --surface:#171D1B; --surface-2:#1E2523;
+    --ink:#E4E9E5; --ink-soft:#99A39D; --ink-faint:#6E7873;
+    --rule:#2B3331; --accent:#58CDB9; --accent-deep:#7FDECD;
+    --accent-soft:#13312B; --warn:#D9A05C; --warn-soft:#2B2317;
+    --on-accent:#0B1110;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#101413; --surface:#171D1B; --surface-2:#1E2523;
+  --ink:#E4E9E5; --ink-soft:#99A39D; --ink-faint:#6E7873;
+  --rule:#2B3331; --accent:#58CDB9; --accent-deep:#7FDECD;
+  --accent-soft:#13312B; --warn:#D9A05C; --warn-soft:#2B2317;
+  --on-accent:#0B1110;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"Newsreader",Georgia,"Times New Roman",serif;
+  font-size:17px; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1140px; margin:0 auto; padding:0 28px 96px}
+.col{max-width:68ch}
+
+/* ---- type ---- */
+h1,h2,h3,.eyebrow,.badge-t{font-family:"Bricolage Grotesque","Helvetica Neue",Arial,sans-serif}
+h1{font-size:clamp(34px,5.2vw,54px); line-height:1.02; font-weight:700; letter-spacing:-.022em;
+   margin:0 0 18px; text-wrap:balance}
+h2{font-size:25px; font-weight:700; letter-spacing:-.012em; margin:0 0 10px; text-wrap:balance}
+h3{font-size:16px; font-weight:700; letter-spacing:-.004em; margin:0 0 8px}
+p{margin:0 0 16px}
+.eyebrow{
+  font-size:11px; font-weight:700; letter-spacing:.16em; text-transform:uppercase;
+  color:var(--accent); margin:0 0 12px
+}
+.lede{font-size:20px; line-height:1.5; color:var(--ink-soft); margin:0 0 8px}
+code,kbd,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+code{font-size:.86em; background:var(--surface-2); padding:.1em .35em; border-radius:3px}
+a{color:var(--accent); text-underline-offset:2px}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--accent); outline-offset:3px; border-radius:2px}
+
+/* ---- masthead ---- */
+header.top{padding:72px 0 8px}
+.rule{height:1px; background:var(--rule); border:0; margin:0}
+.meta{
+  display:flex; flex-wrap:wrap; gap:10px 28px; margin:26px 0 0;
+  font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-faint);
+  letter-spacing:.02em
+}
+.meta b{color:var(--ink-soft); font-weight:500}
+
+/* ---- sections ---- */
+section{padding:60px 0 0}
+.sec-head{display:flex; align-items:baseline; gap:16px; margin-bottom:22px}
+.sec-head .n{
+  font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink-faint);
+  font-weight:500; padding-top:6px
+}
+
+/* ---- figures ---- */
+figure{margin:0 0 8px}
+.scroller{overflow-x:auto; padding:6px 2px 10px; -webkit-overflow-scrolling:touch}
+.scroller svg{display:block; width:100%; min-width:760px; height:auto}
+figcaption{
+  font-size:13.5px; color:var(--ink-soft); max-width:70ch; line-height:1.5;
+  border-left:2px solid var(--rule); padding-left:12px; margin-top:6px
+}
+.svg-frame{background:var(--surface); border:1px solid var(--rule); border-radius:6px; padding:10px 14px}
+
+/* ---- code ---- */
+.code{
+  background:var(--surface); border:1px solid var(--rule); border-radius:6px;
+  overflow:hidden; margin:0 0 18px
+}
+.code-bar{
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+  padding:9px 16px; border-bottom:1px solid var(--rule); background:var(--surface-2);
+  font-family:"IBM Plex Mono",monospace; font-size:11.5px; letter-spacing:.03em;
+}
+.code-bar .f{color:var(--ink); font-weight:600}
+.code-bar .t{color:var(--ink-faint); text-transform:uppercase; letter-spacing:.12em; font-size:10px}
+.code pre{
+  margin:0; padding:16px 18px; overflow-x:auto;
+  font-size:12.8px; line-height:1.72; color:var(--ink)
+}
+.c{color:var(--ink-faint)}
+.req{color:var(--warn); font-weight:600}
+.add{color:var(--accent); font-weight:500}
+.del{color:var(--ink-faint); text-decoration:line-through}
+
+/* ---- grids ---- */
+.two{display:grid; grid-template-columns:1fr 1fr; gap:20px}
+.three{display:grid; grid-template-columns:repeat(3,1fr); gap:16px}
+@media(max-width:860px){.two,.three{grid-template-columns:1fr}}
+
+/* ---- state cards (versions file) ---- */
+.states{display:grid; grid-template-columns:repeat(3,1fr); gap:0; position:relative; margin-top:8px}
+.state{padding:0 20px; border-left:1px solid var(--rule)}
+.state:first-child{border-left:0; padding-left:0}
+.state .when{
+  font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.11em;
+  text-transform:uppercase; color:var(--ink-faint); margin-bottom:10px; display:block
+}
+.state .when b{color:var(--accent); font-weight:600}
+.state pre{
+  margin:0 0 10px; font-family:"IBM Plex Mono",monospace; font-size:12.4px; line-height:1.7;
+  background:var(--surface); border:1px solid var(--rule); border-radius:5px; padding:12px 14px;
+  overflow-x:auto; color:var(--ink)
+}
+.state p{font-size:13.5px; color:var(--ink-soft); line-height:1.5; margin:0}
+@media(max-width:860px){
+  .states{grid-template-columns:1fr}
+  .state{border-left:0; border-top:1px solid var(--rule); padding:20px 0 0}
+  .state:first-child{border-top:0; padding-top:0}
+}
+
+/* ---- notes ---- */
+.note{
+  border-left:2px solid var(--accent); background:var(--accent-soft);
+  padding:14px 18px; border-radius:0 5px 5px 0; margin:22px 0;
+  font-size:14.5px; line-height:1.55; max-width:72ch
+}
+.note.open{border-left-color:var(--warn); background:var(--warn-soft)}
+.note h3{margin-bottom:4px; font-size:13px; letter-spacing:.04em; text-transform:uppercase}
+.note p:last-child{margin-bottom:0}
+
+/* ---- key/value list ---- */
+dl.kv{margin:0; display:grid; grid-template-columns:auto 1fr; gap:0 22px; align-items:baseline}
+dl.kv dt{
+  font-family:"IBM Plex Mono",monospace; font-size:12.5px; color:var(--ink);
+  padding:9px 0; border-top:1px solid var(--rule); white-space:nowrap
+}
+dl.kv dd{margin:0; padding:9px 0; border-top:1px solid var(--rule); font-size:14.5px; color:var(--ink-soft)}
+dl.kv dt:first-of-type,dl.kv dd:first-of-type{border-top:0}
+@media(max-width:640px){
+  dl.kv{grid-template-columns:1fr; gap:0}
+  dl.kv dd{border-top:0; padding-top:0}
+}
+
+footer{padding:64px 0 0; font-size:13px; color:var(--ink-faint); font-family:"IBM Plex Mono",monospace}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <p class="eyebrow">cicada &middot; scenario walkthrough</p>
+  <h1>The cicada release loop scenario 4</h1>
+  <p class="lede col">The same repo and the same service, now shipping its Helm chart from the same tree. Two packages, two version lines, two tags &mdash; and <strong>no umbrella</strong>. One <span class="mono">feat(app):</span> moves both, and the way it moves the chart is the only dependency propagation cicada has.</p>
+  <div class="meta">
+    <span><b>repo</b> acme/app</span>
+    <span><b>packages</b> app &middot; app-chart</span>
+    <span><b>shape</b> app plus its chart (#14, #74)</span>
+    <span><b>app</b> 1.4.2 &rarr; 1.5.0</span>
+    <span><b>app-chart</b> 0.9.0 &rarr; 0.9.1</span>
+  </div>
+</header>
+
+<section>
+  <div class="sec-head"><span class="n">01</span><div><h2>One commit, two releases</h2></div></div>
+  <div class="col"><p>A feature lands on <span class="mono">main</span> scoped to the app. Cicada answers with a single release PR carrying both packages, and when it merges, Phase B cuts <em>two</em> tags and creates <em>two</em> releases &mdash; because a changed chart artifact needs a chart version, even when nobody edited the chart.</p></div>
+
+  <figure>
+    <div class="svg-frame scroller">
+      <svg viewBox="0 0 1080 470" role="img" aria-label="A git graph. Main starts at a commit tagged both v1.4.2 and chart-v0.9.0. A feat(app) commit lands, cicada's release PR branch carries one release commit, and it merges back into main. At the merge commit two tags are created: v1.5.0 and chart-v0.9.1. Below, a panel shows the run produced two release objects and one release manifest embedded in both.">
+        <line x1="200" y1="252" x2="1040" y2="252" stroke="var(--rule)" stroke-dasharray="1 6" stroke-width="1.5"/>
+
+        <g font-family="IBM Plex Mono, monospace" font-size="11" text-anchor="end">
+          <text x="180" y="184" fill="var(--ink-soft)">main</text>
+          <text x="180" y="256" fill="var(--accent)">cicada/main</text>
+        </g>
+
+        <line x1="200" y1="180" x2="1040" y2="180" stroke="currentColor" stroke-width="2"/>
+
+        <path d="M460,180 C520,180 500,252 576,252" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#c4a)"/>
+        <path d="M580,252 C660,252 640,180 776,180" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#c4b)"/>
+        <defs>
+          <marker id="c4a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+          <marker id="c4b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+
+        <circle cx="260" cy="180" r="7.5" fill="currentColor"/>
+        <circle cx="460" cy="180" r="7.5" fill="currentColor"/>
+        <circle cx="780" cy="180" r="7.5" fill="currentColor"/>
+        <circle cx="580" cy="252" r="7.5" fill="var(--accent)"/>
+
+        <!-- tags at rest -->
+        <line x1="260" y1="166" x2="260" y2="173" stroke="var(--ink-faint)" stroke-width="1.5"/>
+        <rect x="212" y="142" width="96" height="21" rx="4" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="260" y="157" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)" text-anchor="middle">chart-v0.9.0</text>
+        <rect x="224" y="116" width="72" height="21" rx="4" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="260" y="131" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)" text-anchor="middle">v1.4.2</text>
+
+        <!-- tags created -->
+        <line x1="780" y1="166" x2="780" y2="173" stroke="var(--accent)" stroke-width="1.5"/>
+        <rect x="732" y="142" width="96" height="21" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="780" y="157" font-family="IBM Plex Mono, monospace" font-size="10.5" font-weight="600" fill="var(--accent)" text-anchor="middle">chart-v0.9.1</text>
+        <rect x="744" y="116" width="72" height="21" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="780" y="131" font-family="IBM Plex Mono, monospace" font-size="10.5" font-weight="600" fill="var(--accent)" text-anchor="middle">v1.5.0</text>
+
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5" text-anchor="middle" fill="currentColor">
+          <text x="460" y="212">c1 &middot; feat(app): add caching</text>
+          <text x="880" y="212">merge</text>
+        </g>
+        <g stroke="var(--ink-faint)" stroke-width="1.2">
+          <line x1="460" y1="196" x2="460" y2="188"/>
+          <line x1="852" y1="208" x2="790" y2="187"/>
+        </g>
+
+        <text x="580" y="282" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--accent)" text-anchor="middle">one release commit &middot; both packages</text>
+
+        <!-- what the run produced -->
+        <rect x="200" y="312" width="840" height="112" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-dasharray="5 4"/>
+        <text x="224" y="338" font-family="Bricolage Grotesque, sans-serif" font-size="12" font-weight="700" letter-spacing="1.2" fill="var(--accent)">WHAT PHASE B PRODUCED, IN CONFIG ORDER (#96)</text>
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5">
+          <text x="224" y="366" fill="var(--ink)">1. tag v1.5.0</text>
+          <text x="420" y="366" fill="var(--ink-soft)">&rarr; create_release &mdash; app notes</text>
+          <text x="224" y="388" fill="var(--ink)">2. tag chart-v0.9.1</text>
+          <text x="420" y="388" fill="var(--ink-soft)">&rarr; create_release &mdash; chart notes</text>
+          <text x="224" y="412" fill="var(--accent)">one release-manifest.json</text>
+          <text x="420" y="412" fill="var(--ink-soft)">listing both &mdash; embedded in <tspan font-weight="600">both</tspan> bodies (#42)</text>
+        </g>
+
+        <line x1="200" y1="444" x2="1040" y2="444" stroke="var(--rule)"/>
+        <circle cx="208" cy="462" r="6" fill="currentColor"/>
+        <text x="222" y="466" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)">human</text>
+        <circle cx="310" cy="462" r="6" fill="var(--accent)"/>
+        <text x="324" y="466" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)">cicada</text>
+      </svg>
+    </div>
+    <figcaption>Nobody edited the chart, and the chart still released. That is the whole subject of this scenario &mdash; and the reason there is <span class="mono">no [umbrella]</span> anywhere in it: these are two independent version lines that happen to share a tree, not a parent and a child (#74).</figcaption>
+  </figure>
+
+  <div class="note col">
+    <h3>Why the manifest is in both release bodies</h3>
+    <p>This repo declares no umbrella, so there is no summary release to hang the manifest on. cicada embeds it in <em>every</em> release a run creates (#42), which means a reader of either release can answer &ldquo;what else shipped with this?&rdquo; without knowing which one is supposed to be the important one. Both copies are byte-identical &mdash; one artifact, not two renders.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">02</span><div><h2>Two lines, one declared link</h2></div></div>
+  <div class="col"><p>The chart is its <em>own package</em> with its own version, its own tag format and its own changelog (#14). Exactly one thing crosses between them, and it is written in config rather than inferred from the filesystem.</p></div>
+
+  <figure>
+    <div class="svg-frame scroller">
+      <svg viewBox="0 0 1080 340" role="img" aria-label="Two package boxes side by side. The app package holds version 1.5.0. The app-chart package holds its own version 0.9.1 and an appVersion of 1.5.0. One arrow carries the app's version into appVersion, labelled mirrors. A second arrow carries the fact that the app released into the chart's own version bump, labelled derived bump sized by on_tracked_bump. A caption notes the chart's version line is otherwise independent.">
+        <rect x="60" y="60" width="380" height="150" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="84" y="90" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--ink)">package app</text>
+        <line x1="84" y1="102" x2="416" y2="102" stroke="var(--rule)"/>
+        <text x="84" y="130" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">Cargo.toml</text>
+        <text x="84" y="154" font-family="IBM Plex Mono, monospace" font-size="13" fill="var(--accent)" font-weight="600">version = "1.5.0"</text>
+        <text x="84" y="182" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)">tag v1.5.0 &middot; CHANGELOG.md at the root</text>
+
+        <rect x="640" y="36" width="380" height="198" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="664" y="66" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--ink)">package app-chart</text>
+        <line x1="664" y1="78" x2="996" y2="78" stroke="var(--rule)"/>
+        <text x="664" y="106" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">deploy/chart/Chart.yaml</text>
+        <text x="664" y="132" font-family="IBM Plex Mono, monospace" font-size="13" fill="var(--accent)" font-weight="600">version: 0.9.1</text>
+        <text x="664" y="152" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)">its own line &mdash; never the app's number</text>
+        <text x="664" y="184" font-family="IBM Plex Mono, monospace" font-size="13" fill="var(--warn)" font-weight="600">appVersion: "1.5.0"</text>
+        <text x="664" y="204" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)">mirrored, and always quoted (#51)</text>
+
+        <path d="M440,150 C520,150 540,184 636,184" fill="none" stroke="var(--warn)" stroke-width="2" marker-end="url(#c4w)"/>
+        <path d="M440,120 C520,120 540,124 636,124" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#c4c)"/>
+        <defs>
+          <marker id="c4w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--warn)"/></marker>
+          <marker id="c4c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+        </defs>
+        <text x="538" y="112" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--accent)" text-anchor="middle">the app released</text>
+        <text x="538" y="98" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--accent)" text-anchor="middle">&rarr; derived bump</text>
+        <text x="538" y="172" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--warn)" text-anchor="middle">version mirrored</text>
+
+        <rect x="60" y="256" width="960" height="64" rx="6" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="84" y="282" font-family="Bricolage Grotesque, sans-serif" font-size="12" font-weight="700" letter-spacing="1.2" fill="var(--accent)">TWO ARROWS, AND ONLY ONE OF THEM CARRIES A NUMBER</text>
+        <text x="84" y="304" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">appVersion is copied outright; the chart's own version takes a bump whose SIZE comes from on_tracked_bump, never the app's value</text>
+      </svg>
+    </div>
+    <figcaption>&ldquo;Tracks&rdquo; means two different things here, and conflating them is the mistake this figure exists to prevent. <span class="mono">appVersion</span> genuinely mirrors &mdash; it becomes <span class="mono">1.5.0</span>. The chart&rsquo;s <em>own</em> version does not: it takes a bump of the configured size and stays on its own line.</figcaption>
+  </figure>
+
+  <div class="note col">
+    <h3>This is the only dependency propagation in cicada</h3>
+    <p>Everywhere else, blast radius is <em>declared</em> by the author through multi-scope commits &mdash; <span class="mono">feat(auth,api):</span> &mdash; and inferring it from Cargo or npm manifests is a permanent non-goal. Chart tracking is the single exception, and it earns it by being explicit: <span class="mono">app_version = { track = "app" }</span> is a line a human wrote, not a graph cicada walked. A changed chart artifact requires a new chart version, and cicada knows that only because you said so.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">03</span><div><h2>cicada.toml</h2></div></div>
+  <div class="col"><p>The whole file, so this scenario stands on its own. It is scenario&nbsp;1&rsquo;s file plus one package stanza &mdash; and still no <span class="mono">[umbrella]</span>.</p></div>
+
+  <div class="code">
+    <div class="code-bar"><span class="f">cicada.toml</span><span class="t">human-owned &middot; committed</span></div>
+<pre><span class="c"># acme/app — one Rust service and its chart, two version lines, no umbrella</span>
+
+[settings]
+release_branches  = ["main"]                  <span class="c"># the gate: cicada acts only on these</span>
+default_scope     = "app"                     <span class="req">&lt;- required</span> <span class="c">unscoped commits are an APP change</span>
+committer         = "cicada[bot] &lt;cicada@users.noreply.github.com&gt;"
+commit_source     = "commits"
+release_pr_branch = "cicada/{branch}"
+release_pr_title  = "chore(release): prepare release"
+
+[forge]
+kind = "github"                               <span class="req">&lt;- required</span>
+repo = "acme/app"
+
+[changelog]
+sections = [
+  { type = "feat",  title = "Features",      bump = "minor" },
+  { type = "fix",   title = "Bug Fixes",     bump = "patch" },
+  { type = "perf",  title = "Performance",   bump = "patch" },
+  { type = "docs",  title = "Documentation", bump = "none"  },
+  { type = "chore", title = "Chores",        bump = "none", hidden = true },
+]
+
+[packages.app]                                <span class="c"># package 1 of 2 — declared first, so released first (#96)</span>
+path       = "."
+tag_format = "v{version}"
+changelog  = "CHANGELOG.md"
+
+[[packages.app.updaters]]
+kind = "cargo"
+path = "Cargo.toml"
+
+<span class="c"># The chart is its OWN package with its OWN version line (#14).
+# Not a child, not a sub-version — cicada draws no parent/child relation anywhere.</span>
+[packages.app-chart]
+path            = "deploy/chart"
+tag_format      = "chart-v{version}"          <span class="c"># a separate tag namespace — never collides with v{version}</span>
+changelog       = "deploy/chart/CHANGELOG.md"
+initial_version = "0.1.0"                     <span class="req">&lt;- required on helm</span> <span class="c">(#88)</span>
+
+[[packages.app-chart.updaters]]
+kind            = "helm"
+path            = "deploy/chart/Chart.yaml"
+app_version     = { track = "app" }           <span class="c"># appVersion mirrors the `app` package</span>
+on_tracked_bump = "patch"                     <span class="c"># the chart's OWN bump when `app` releases</span>
+
+<span class="c"># no [umbrella] — two packages is not a reason to invent an aggregate version (#73)</span>
+</pre>
+  </div>
+
+  <div class="two" style="margin-top:26px">
+    <div>
+      <h3>The four lines that make this shape 2</h3>
+      <dl class="kv">
+        <dt>tag_format</dt><dd>Two namespaces, <span class="mono">v{version}</span> and <span class="mono">chart-v{version}</span>. Two packages sharing a tag shape is a <span class="mono">check</span> finding &mdash; it is a version collision waiting to happen.</dd>
+        <dt>app_version.track</dt><dd>The declared link. Names a real package or <span class="mono">check</span> fails.</dd>
+        <dt>on_tracked_bump</dt><dd>How big the chart&rsquo;s <em>own</em> bump is when the app releases. Defaults to <span class="mono">patch</span>.</dd>
+        <dt>initial_version</dt><dd>Required on a <span class="mono">helm</span> package. Helm makes <span class="mono">version</span> mandatory in <span class="mono">Chart.yaml</span>, so the number already exists &mdash; cicada neither invents it nor reads it back (#75, #88).</dd>
+      </dl>
+    </div>
+    <div>
+      <h3>Why no umbrella</h3>
+      <dl class="kv">
+        <dt>nothing to aggregate</dt><dd>An umbrella aggregates a <em>bump kind</em> across children. With two packages one of which is derived from the other, the aggregate would restate what the app already said.</dd>
+        <dt>opt-in, always</dt><dd>cicada never assumes an aggregate version (#73). Declaring one is a statement that the set ships together under a single label.</dd>
+        <dt>default_scope</dt><dd>With no umbrella it must name a real package &mdash; here <span class="mono">app</span>, so <span class="mono">fix:</span> is an app fix.</dd>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">04</span><div><h2>Earned, derived, and both at once</h2></div></div>
+  <div class="col"><p>The chart&rsquo;s version can move for two unrelated reasons, and the interesting case is when both apply in one range.</p></div>
+
+  <figure>
+    <div class="svg-frame scroller">
+      <svg viewBox="0 0 1080 340" role="img" aria-label="Three tracks. A feat scoped to the app gives app 1.5.0 and a derived patch taking the chart to 0.9.1, with appVersion rewritten. A feat scoped to the chart gives the chart an earned minor to 0.10.0 with the app untouched and appVersion not rewritten. Both commits together give app 1.5.0 and the chart 0.10.0, because the larger of the earned minor and the derived patch wins, and appVersion is still rewritten.">
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5">
+          <rect x="30" y="34" width="330" height="40" rx="5" fill="var(--surface-2)" stroke="var(--rule)"/>
+          <text x="195" y="59" fill="var(--ink)" text-anchor="middle">feat(app): add caching</text>
+          <line x1="195" y1="74" x2="195" y2="98" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#c4m)"/>
+          <rect x="30" y="102" width="330" height="96" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="52" y="128" fill="var(--accent)" font-weight="600">app    1.4.2 &rarr; 1.5.0</text>
+          <text x="52" y="150" fill="var(--ink-soft)">chart  0.9.0 &rarr; 0.9.1</text>
+          <text x="52" y="170" font-size="10.5" fill="var(--ink-faint)">derived &mdash; on_tracked_bump = patch</text>
+          <text x="52" y="188" font-size="10.5" fill="var(--warn)">appVersion &rarr; "1.5.0"</text>
+
+          <rect x="375" y="34" width="330" height="40" rx="5" fill="var(--surface-2)" stroke="var(--rule)"/>
+          <text x="540" y="59" fill="var(--ink)" text-anchor="middle">feat(app-chart): add a PDB</text>
+          <line x1="540" y1="74" x2="540" y2="98" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#c4m)"/>
+          <rect x="375" y="102" width="330" height="96" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="397" y="128" fill="var(--ink-faint)">app    untouched</text>
+          <text x="397" y="150" fill="var(--accent)" font-weight="600">chart  0.9.0 &rarr; 0.10.0</text>
+          <text x="397" y="170" font-size="10.5" fill="var(--ink-faint)">earned &mdash; pre_major keeps 0.x in 0.x</text>
+          <text x="397" y="188" font-size="10.5" fill="var(--ink-faint)">appVersion NOT rewritten</text>
+
+          <rect x="720" y="34" width="330" height="40" rx="5" fill="var(--surface-2)" stroke="var(--rule)"/>
+          <text x="885" y="59" fill="var(--ink)" text-anchor="middle">both, in one range</text>
+          <line x1="885" y1="74" x2="885" y2="98" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#c4m)"/>
+          <rect x="720" y="102" width="330" height="96" rx="5" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="742" y="128" fill="var(--accent)" font-weight="600">app    1.4.2 &rarr; 1.5.0</text>
+          <text x="742" y="150" fill="var(--accent)" font-weight="600">chart  0.9.0 &rarr; 0.10.0</text>
+          <text x="742" y="170" font-size="10.5" fill="var(--ink-soft)">larger of earned minor / derived patch</text>
+          <text x="742" y="188" font-size="10.5" fill="var(--warn)">appVersion &rarr; "1.5.0"</text>
+        </g>
+        <defs>
+          <marker id="c4m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ink-faint)"/></marker>
+        </defs>
+
+        <rect x="30" y="228" width="1020" height="86" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-dasharray="5 4"/>
+        <text x="52" y="254" font-family="Bricolage Grotesque, sans-serif" font-size="12" font-weight="700" letter-spacing="1.2" fill="var(--accent)">THE TWO REASONS DO NOT ADD UP &mdash; THEY RECONCILE TO THE LARGER</text>
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">
+          <text x="52" y="278">0.9.0 + earned minor + derived patch is 0.10.0, never 0.10.1 — the bumps are alternatives, not a sum</text>
+          <text x="52" y="298">and appVersion is decided separately again: it mirrors the app whenever the app released, whatever the chart did</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Track two is the one worth pinning: a chart-only change leaves <span class="mono">appVersion</span> exactly as it was. The app did not release, so there is no new app version to mirror &mdash; and writing the <em>existing</em> one back would be a no-op edit in a reviewed diff.</figcaption>
+  </figure>
+
+  <div class="note col">
+    <h3>An unscoped commit is a silent choice</h3>
+    <p><span class="mono">fix: handle nil</span> with <span class="mono">default_scope = "app"</span> is an <em>app</em> fix &mdash; so it bumps the app to <span class="mono">1.4.3</span> and drags the chart to <span class="mono">0.9.1</span>. In scenario 1 the scope was decoration, because there was only one destination. Here it decides which of two packages moves, and the default decides it quietly. <span class="mono">feat(app-chart):</span> is the only way to say &ldquo;chart only&rdquo;.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">05</span><div><h2>What the release PR contains</h2></div></div>
+  <div class="col"><p>One commit, authored by <span class="mono">cicada[bot]</span>, touching five files. Scenario&nbsp;1&rsquo;s three, plus the chart&rsquo;s two.</p></div>
+
+  <div class="three">
+    <div class="code">
+      <div class="code-bar"><span class="f">Cargo.toml</span><span class="t">cargo updater</span></div>
+<pre> [package]
+ name = "app"
+<span class="del">-version = "1.4.2"</span>
+<span class="add">+version = "1.5.0"</span></pre>
+    </div>
+    <div class="code">
+      <div class="code-bar"><span class="f">Chart.yaml</span><span class="t">helm updater</span></div>
+<pre> name: app
+<span class="del">-version: 0.9.0</span>
+<span class="add">+version: 0.9.1</span>
+<span class="del">-appVersion: "1.4.2"</span>
+<span class="add">+appVersion: "1.5.0"</span></pre>
+    </div>
+    <div class="code">
+      <div class="code-bar"><span class="f">.cicada-versions.toml</span><span class="t">tool-owned</span></div>
+<pre> [packages.app]
+<span class="del">-version = "1.4.2"</span>
+<span class="add">+version = "1.5.0"</span>
+
+ [packages.app-chart]
+<span class="del">-version = "0.9.0"</span>
+<span class="add">+version = "0.9.1"</span></pre>
+    </div>
+  </div>
+
+  <div class="two" style="margin-top:4px">
+    <div class="code">
+      <div class="code-bar"><span class="f">CHANGELOG.md</span><span class="t">the app's own</span></div>
+<pre> # Changelog
+
+ &lt;!-- cicada:insert --&gt;
+<span class="add">+## 1.5.0 (2026-09-15)</span>
+<span class="add">+</span>
+<span class="add">+### Features</span>
+<span class="add">+</span>
+<span class="add">+* add caching (a1b2c3d)</span>
+
+ ## 1.4.2 (2026-08-02)</pre>
+    </div>
+    <div class="code">
+      <div class="code-bar"><span class="f">deploy/chart/CHANGELOG.md</span><span class="t">the chart's own</span></div>
+<pre> # Changelog
+
+ &lt;!-- cicada:insert --&gt;
+<span class="add">+## 0.9.1 (2026-09-15)</span>
+<span class="add">+</span>
+<span class="add">+_Released to track app 1.5.0._</span>
+
+ ## 0.9.0 (2026-07-18)</pre>
+    </div>
+  </div>
+
+  <div class="note col">
+    <h3>Each changelog contains only its own package&rsquo;s commits</h3>
+    <p>The <span class="mono">feat(app): add caching</span> line appears in the root <span class="mono">CHANGELOG.md</span> and <strong>not</strong> in the chart&rsquo;s &mdash; the chart did not receive that commit, it received a consequence of it. That is what makes the panel above incomplete rather than wrong.</p>
+  </div>
+
+  <div class="note col">
+    <h3>A release with no commits explains itself</h3>
+    <p>The chart received <em>no commits</em>, so its entry cannot be rendered from a range. The notes context carries <span class="mono">derived_from</span> instead &mdash; the package and version that caused the release &mdash; and the default template turns that into one line (#97).</p>
+    <p>Three things about that. The entry is <strong>written, not skipped</strong>: leaving it out would put a hole in the chart&rsquo;s changelog where a real tagged release was, and a reader looking up <span class="mono">0.9.1</span> would find nothing. It is <strong>data, not prose cicada emits</strong> &mdash; core already labels the bump <span class="mono">derived</span> in the plan, so this only surfaces what exists, and the wording lives in a template you can override. And it is <strong>not an empty entry</strong>, which would be honest and would read as a rendering bug.</p>
+  </div>
+
+  <div class="note col">
+    <h3>Rehearse it offline</h3>
+    <p><span class="mono">cicada release-pr --no-push</span> produces exactly this commit on a real local branch &mdash; no token, no network, no forge &mdash; and <span class="mono">git show cicada/main</span> displays all five files. The release manifest lands at <span class="mono">target/cicada/release-manifest.json</span> listing both packages, which under <span class="mono">--no-push</span> is the only place to inspect it, since no release object exists to embed it in.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">06</span><div><h2>The anchors diverge, and that is the point</h2></div></div>
+  <div class="col"><p>Each package resolves its own anchor from its own recorded version, so each gets its own commit range. After one shared release the two anchors sit on the same commit; one chart-only change later, they do not.</p></div>
+
+  <figure>
+    <div class="svg-frame scroller">
+      <svg viewBox="0 0 1080 300" role="img" aria-label="A timeline. After a shared release, tags v1.5.0 and chart-v0.9.1 sit on the same commit. A chart-only commit then releases chart-v0.10.0 further along. From that point the app's range starts at the earlier v1.5.0 tag while the chart's range starts at the later chart-v0.10.0 tag, so the two ranges have different lengths.">
+        <line x1="150" y1="118" x2="1000" y2="118" stroke="currentColor" stroke-width="2"/>
+        <circle cx="260" cy="118" r="7" fill="currentColor"/>
+        <circle cx="520" cy="118" r="7" fill="currentColor"/>
+        <circle cx="760" cy="118" r="7" fill="currentColor"/>
+        <circle cx="940" cy="118" r="7" fill="currentColor"/>
+
+        <line x1="260" y1="104" x2="260" y2="111" stroke="var(--accent)" stroke-width="1.5"/>
+        <rect x="212" y="78" width="96" height="21" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="260" y="93" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--accent)" text-anchor="middle">chart-v0.9.1</text>
+        <rect x="224" y="52" width="72" height="21" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="260" y="67" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--accent)" text-anchor="middle">v1.5.0</text>
+        <text x="260" y="36" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle">both, one commit</text>
+
+        <line x1="520" y1="104" x2="520" y2="111" stroke="var(--accent)" stroke-width="1.5"/>
+        <rect x="466" y="78" width="108" height="21" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="520" y="93" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--accent)" text-anchor="middle">chart-v0.10.0</text>
+        <text x="520" y="62" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle">chart-only release</text>
+
+        <g font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)" text-anchor="middle">
+          <text x="760" y="146">c8 fix(app)</text>
+          <text x="940" y="146">HEAD</text>
+        </g>
+
+        <g stroke="var(--accent)" stroke-width="1.8">
+          <line x1="260" y1="196" x2="940" y2="196"/><line x1="260" y1="189" x2="260" y2="203"/><line x1="940" y1="189" x2="940" y2="203"/>
+          <line x1="520" y1="246" x2="940" y2="246"/><line x1="520" y1="239" x2="520" y2="253"/><line x1="940" y1="239" x2="940" y2="253"/>
+        </g>
+        <text x="150" y="200" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--accent)" text-anchor="end">app</text>
+        <text x="600" y="184" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)" text-anchor="middle">v1.5.0..HEAD</text>
+        <text x="150" y="250" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--accent)" text-anchor="end">app-chart</text>
+        <text x="730" y="234" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)" text-anchor="middle">chart-v0.10.0..HEAD</text>
+
+        <text x="150" y="284" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)">one git log per package, different anchors — N is small and each call is milliseconds</text>
+      </svg>
+    </div>
+    <figcaption>This is why per-package anchors are the design rather than a shared range with filtering: the two packages are simply at different points in history, and nothing has to reconcile them.</figcaption>
+  </figure>
+
+  <div class="note col">
+    <h3>Two failure modes worth knowing</h3>
+    <p><strong>A maintenance line refuses a dragged minor.</strong> With <span class="mono">on_tracked_bump = "minor"</span> on a branch matching <span class="mono">maintenance_branches</span>, an app release drags the chart above patch and the run hard-errors at exit <span class="mono">4</span>. The message names the <em>chart</em> and its tracking relationship, not just the app commit &mdash; the cause is one step removed, and naming only the commit sends the reader to a file that looks correct.</p>
+    <p><strong>An unquoted appVersion is a silent type change.</strong> <span class="mono">appVersion: 1.10</span> parses as the float <span class="mono">1.1</span>. Byte-splicing faithfully preserves whatever quoting it finds, so the helm updater always writes <span class="mono">appVersion</span> <em>quoted</em> and warns when it finds an unquoted value already there (#51).</p>
+  </div>
+</section>
+
+<footer>
+  <hr class="rule" style="margin-bottom:20px">
+  scenario 4 &middot; derived from docs/design.md &sect;Updaters and &sect;Bump computation, and docs/scenarios/single-service.md group M &middot; shape 2, two packages, no umbrella
+</footer>
+
+</div>

@@ -1,0 +1,7 @@
+/target
+target/
+
+# The release manifest describes a run, not a state of the repository (#42).
+# Redundant while `target/` is ignored above; here so a non-Rust repo copying
+# this file gets it too.
+target/cicada/

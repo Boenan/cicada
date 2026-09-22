@@ -1,0 +1,249 @@
+# The artifact workflow — the other half of decision #70.
+#
+# cicada does **not** build artifacts. It owns versioning, changelogs, tags and
+# release objects; this workflow reacts to the tag cicada pushes and attaches the
+# binaries and images to the release cicada already created. Keeping the two
+# apart is what lets a failed artifact build be retried without touching version
+# state, and it is why cicada never grows a cross-compilation matrix of its own.
+#
+# The contract this file has to satisfy is not a matter of taste — it is already
+# written down in two shipped assets, and `cicada/tests/shipped_assets.rs`
+# asserts the three halves still meet:
+#
+#   action.yml        downloads `cicada-<arch>-unknown-linux-musl` and verifies
+#                     it against `SHA256SUMS`
+#   ci/gitlab-ci.yml  runs `ghcr.io/boenan/cicada:v1`
+#
+# THE TRIGGER FOOTGUN, in its third form. Workflows do not run on events created
+# by the default `GITHUB_TOKEN` — that is the README's "CI-trigger footgun" for
+# pull requests, and it applies identically to **tag pushes**. If cicada runs
+# with `secrets.GITHUB_TOKEN`, it will push the tag and create the release, this
+# workflow will never fire, and the release will sit there looking healthy with
+# no binaries on it. Use the PAT the README already tells you to use; the
+# `workflow_dispatch` below is the manual repair when it has already happened.
+
+name: artifacts
+
+on:
+  push:
+    # `tag_format = "v{version}"` in cicada.toml. Covers prereleases too —
+    # `v1.5.0-alpha.1` is a tag a tester needs a binary for.
+    tags: ['v*']
+
+  # Re-attaching artifacts to a tag that already exists. This is the retry that
+  # #70's separation is *for*: the version state is already correct and must not
+  # be recomputed, so this path takes a tag and builds from it, nothing else.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The existing tag to build artifacts for, e.g. v1.2.3
+        required: true
+
+permissions:
+  contents: write   # uploading release assets
+  packages: write   # pushing to ghcr.io
+
+# Per-tag, because two runs for the same tag would race on `--clobber`. Runs for
+# *different* tags are independent and must not queue behind each other.
+concurrency: artifacts-${{ inputs.tag || github.ref_name }}
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # One arch failing should not deny the other its evidence.
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-musl
+            # Native arm64, rather than cross-compiling from x86_64. `ring`
+            # compiles C, so a cross build needs an aarch64-targeting musl C
+            # toolchain; a native runner needs only the `musl-tools` below. If
+            # these runners are ever unavailable to this repo, the fallback is
+            # `cross`, not a hand-assembled toolchain.
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The tag, never the branch tip. On `workflow_dispatch` they are
+          # routinely different, and building the wrong commit would publish a
+          # binary that does not match the release it is attached to.
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install the musl toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          # `ring` builds C, and that C has to be compiled against musl.
+          sudo apt-get install -y -qq musl-tools
+          rustup target add "${{ matrix.target }}"
+
+      - name: Build
+        # `--locked` so the published binary is built from the committed
+        # dependency graph rather than whatever resolved today.
+        run: cargo build --release --locked -p cicada --target "${{ matrix.target }}"
+
+      - name: Strip, name, and check
+        run: |
+          set -euo pipefail
+          bin="target/${{ matrix.target }}/release/cicada"
+
+          # ~10.7MB unstripped; the symbols are of no use to anyone downloading a
+          # release binary, and this is a file every CI run pulls.
+          strip "$bin"
+
+          # The binary must agree with the tag it is about to be attached to.
+          # `cicada --version` reports CARGO_PKG_VERSION — a number cicada bumped
+          # itself — so a mismatch means this workflow is building a commit that
+          # is not the release commit, which is silent every other way.
+          built="$(./"$bin" --version | awk '{print $2}')"
+          want="${TAG#v}"
+          if [ "$built" != "$want" ]; then
+            echo "::error::tag ${TAG} carries version ${want}, but the binary reports ${built}" >&2
+            exit 1
+          fi
+
+          # The name `action.yml` downloads. Flat file, not a tarball: the action
+          # curls it straight to disk and chmods it.
+          mv "$bin" "cicada-${{ matrix.target }}"
+          ./"cicada-${{ matrix.target }}" --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cicada-${{ matrix.target }}
+          path: cicada-${{ matrix.target }}
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  release-assets:
+    name: attach to the release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          # Plain `sha256sum` output, in sorted order so the file is a
+          # deterministic function of its inputs. The format matters: `action.yml`
+          # verifies with `sha256sum -c`, which wants exactly this.
+          ls cicada-* | sort | xargs sha256sum > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Wait for the release object
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Phase B pushes the tag and *then* creates the release object, so this
+          # workflow can be running before the thing it uploads to exists. The
+          # gap is normally a second or two.
+          #
+          # It can also never close: if release creation failed, cicada leaves the
+          # tag and self-heals on its next run (#56). Waiting forever would hide
+          # that, so this gives up and says which of the two happened.
+          for i in $(seq 1 60); do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              echo "release ${TAG} is there after ${i} attempt(s)"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::no release object for ${TAG} after 5 minutes." >&2
+          echo "::error::The tag exists, so cicada got that far. Either release creation failed — cicada will self-heal it on its next run (#56), and this workflow can then be re-run from workflow_dispatch — or the tag was not created by cicada." >&2
+          exit 1
+
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # `--clobber` so a re-run repairs a partial upload instead of failing on
+        # the assets that already landed.
+        run: gh release upload "$TAG" dist/cicada-* dist/SHA256SUMS --clobber
+
+  # ---------------------------------------------------------------------------
+  image:
+    name: ghcr.io image
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Name the binaries the way buildx asks for them
+        run: |
+          set -euo pipefail
+          # `TARGETARCH` is Docker's spelling (amd64/arm64), not the Rust triple's.
+          mv dist/cicada-x86_64-unknown-linux-musl  dist/cicada-amd64
+          mv dist/cicada-aarch64-unknown-linux-musl dist/cicada-arm64
+          chmod +x dist/cicada-amd64 dist/cicada-arm64
+
+      - name: Compute the tags
+        id: tags
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          version="${TAG#v}"
+
+          # The exact version, always.
+          tags="${image}:${TAG}"
+
+          # The moving tags point at a release people should be upgraded onto by
+          # default — so a prerelease gets the exact tag and nothing else.
+          # `ghcr.io/boenan/cicada:v1` resolving to an alpha because an alpha was
+          # cut most recently is the kind of thing nobody notices until it breaks
+          # a pipeline that was pinned to `v1` precisely to avoid surprises.
+          case "$version" in
+            *-*)
+              echo "prerelease: the exact tag only" ;;
+            *)
+              major="${version%%.*}"
+              minor="${version#*.}"; minor="${minor%%.*}"
+              tags="${tags},${image}:v${major}.${minor},${image}:v${major},${image}:latest" ;;
+          esac
+
+          echo "image=${image}"  >> "$GITHUB_OUTPUT"
+          echo "tags=${tags}"    >> "$GITHUB_OUTPUT"
+          echo "$tags"
+
+      - uses: docker/setup-qemu-action@v3
+        # Only for the `apk add` and the sanity check in the arm64 layer — the
+        # binary itself was built natively and is merely copied in.
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ci/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            VERSION=${{ env.TAG }}

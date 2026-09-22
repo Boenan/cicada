@@ -1,0 +1,137 @@
+# The shipped GitHub Action (design §Distribution).
+#
+# A **static asset**, not a rendered template: minijinja never touches this file.
+# Users reference it, they do not generate it.
+#
+# It is a *composite* action rather than a Docker one so it costs no image pull
+# on a runner that already has the binary cached, and so the step runs in the
+# caller's workspace with the caller's checkout.
+name: cicada
+description: Release automation driven by conventional commits — versions, changelogs, tags and releases.
+author: cicada
+
+branding:
+  icon: tag
+  color: green
+
+inputs:
+  command:
+    description: >
+      Which cicada command to run. Defaults to `run`, which is Phase B then
+      Phase A in that order — the order CI must not be able to get wrong (#35).
+    required: false
+    default: run
+
+  token:
+    description: >
+      The token cicada uses for the forge API and the git push.
+
+      NOT the default GITHUB_TOKEN unless you have read the CI-trigger note in
+      the README: workflows do not run on pull requests the default token
+      creates, so the release PR's checks never start. Use a PAT or a GitHub App
+      token.
+    required: true
+
+  version:
+    description: >
+      The cicada version to install, e.g. `v1.2.3`. Defaults to the tag this
+      action was referenced at, so `uses: org/cicada@v1` installs cicada v1.
+    required: false
+    default: ''
+
+  args:
+    description: Extra arguments appended to the command, e.g. `--dry-run`.
+    required: false
+    default: ''
+
+  working-directory:
+    description: Directory to run in. Defaults to the workspace root.
+    required: false
+    default: '.'
+
+outputs:
+  exit-code:
+    description: >
+      cicada's exit code, which is a contract (#68): 0 ok (including "nothing to
+      release"), 1 error, 2 usage, 3 check found problems, 4 refused.
+    value: ${{ steps.cicada.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install cicada
+      shell: bash
+      env:
+        # Downloading the release asset needs a token on a private repo and is
+        # rate-limited without one anywhere.
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+
+        # Already on PATH — a self-hosted runner with it baked in, or a previous
+        # step that built it. Nothing to do.
+        if command -v cicada >/dev/null 2>&1; then
+          echo "using $(command -v cicada) ($(cicada --version))"
+          exit 0
+        fi
+
+        version="${{ inputs.version }}"
+        if [ -z "$version" ]; then
+          # `uses: org/cicada@v1` → GITHUB_ACTION_REF is `v1`.
+          version="${GITHUB_ACTION_REF:-}"
+        fi
+        if [ -z "$version" ]; then
+          echo "::error::cannot tell which cicada version to install; set the \`version\` input" >&2
+          exit 1
+        fi
+
+        case "$(uname -m)" in
+          x86_64)          arch=x86_64 ;;
+          aarch64|arm64)   arch=aarch64 ;;
+          *) echo "::error::unsupported architecture $(uname -m); cicada ships x86_64 and aarch64 Linux binaries" >&2; exit 1 ;;
+        esac
+
+        asset="cicada-${arch}-unknown-linux-musl"
+        base="https://github.com/${GITHUB_ACTION_REPOSITORY:-boenan/cicada}/releases/download/${version}"
+
+        tmp="$(mktemp -d)"
+        # Downloaded under its published name, and renamed only after the check.
+        # Rewriting the filename inside SHA256SUMS instead means reproducing
+        # `sha256sum`'s exact two-space separator, and getting that off by one
+        # makes the check look for a file that does not exist — which reads as a
+        # missing file rather than as a failed verification.
+        curl -sSfL "${base}/${asset}" -o "${tmp}/${asset}"
+        # Checksums ship alongside the binaries, so verify rather than trust.
+        if curl -sSfL "${base}/SHA256SUMS" -o "${tmp}/SHA256SUMS"; then
+          # `--ignore-missing` because SHA256SUMS lists every architecture and
+          # only one of them was downloaded. It is not a way of passing quietly:
+          # with nothing left to verify `sha256sum` still exits non-zero, so a
+          # SHA256SUMS that does not mention this asset fails here.
+          ( cd "$tmp" && sha256sum --check --ignore-missing SHA256SUMS )
+        else
+          echo "::warning::no SHA256SUMS published for ${version}; the binary was not verified"
+        fi
+
+        chmod +x "${tmp}/${asset}"
+        mkdir -p "${RUNNER_TEMP}/cicada-bin"
+        mv "${tmp}/${asset}" "${RUNNER_TEMP}/cicada-bin/cicada"
+        echo "${RUNNER_TEMP}/cicada-bin" >> "$GITHUB_PATH"
+
+    - name: Run cicada
+      id: cicada
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        # Never in argv: cicada reads it here and passes it to git through
+        # GIT_ASKPASS (#18).
+        CICADA_TOKEN: ${{ inputs.token }}
+      run: |
+        set -uo pipefail
+        cicada ${{ inputs.command }} ${{ inputs.args }}
+        code=$?
+        echo "exit-code=${code}" >> "$GITHUB_OUTPUT"
+
+        # `3` (your commits are malformed) and `4` (cicada declined to act) are
+        # separated from `1` (cicada broke) deliberately, and all three should
+        # fail the job. `0` includes "nothing to release", which is normal.
+        exit $code

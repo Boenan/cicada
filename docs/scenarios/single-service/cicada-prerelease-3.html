@@ -1,0 +1,684 @@
+<title>Cicada Prerelease Line</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;500&display=swap">
+
+<style>
+:root{
+  --ground:#F1F3F0; --surface:#FBFCFA; --surface-2:#E7EBE6;
+  --ink:#17201D; --ink-soft:#5C665F; --ink-faint:#8D968F;
+  --rule:#D4DAD2; --accent:#146A5E; --accent-deep:#0E4E45;
+  --accent-soft:#DCEBE6; --warn:#8C5416; --warn-soft:#F2E8D8;
+  --on-accent:#F1F3F0;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#101413; --surface:#171D1B; --surface-2:#1E2523;
+    --ink:#E4E9E5; --ink-soft:#99A39D; --ink-faint:#6E7873;
+    --rule:#2B3331; --accent:#58CDB9; --accent-deep:#7FDECD;
+    --accent-soft:#13312B; --warn:#D9A05C; --warn-soft:#2B2317;
+    --on-accent:#0B1110;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#101413; --surface:#171D1B; --surface-2:#1E2523;
+  --ink:#E4E9E5; --ink-soft:#99A39D; --ink-faint:#6E7873;
+  --rule:#2B3331; --accent:#58CDB9; --accent-deep:#7FDECD;
+  --accent-soft:#13312B; --warn:#D9A05C; --warn-soft:#2B2317;
+  --on-accent:#0B1110;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"Newsreader",Georgia,"Times New Roman",serif;
+  font-size:17px; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1140px; margin:0 auto; padding:0 28px 96px}
+.col{max-width:68ch}
+
+/* ---- type ---- */
+h1,h2,h3,.eyebrow,.badge-t{font-family:"Bricolage Grotesque","Helvetica Neue",Arial,sans-serif}
+h1{font-size:clamp(34px,5.2vw,54px); line-height:1.02; font-weight:700; letter-spacing:-.022em;
+   margin:0 0 18px; text-wrap:balance}
+h2{font-size:25px; font-weight:700; letter-spacing:-.012em; margin:0 0 10px; text-wrap:balance}
+h3{font-size:16px; font-weight:700; letter-spacing:-.004em; margin:0 0 8px}
+p{margin:0 0 16px}
+.eyebrow{
+  font-size:11px; font-weight:700; letter-spacing:.16em; text-transform:uppercase;
+  color:var(--accent); margin:0 0 12px
+}
+.lede{font-size:20px; line-height:1.5; color:var(--ink-soft); margin:0 0 8px}
+code,kbd,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+code{font-size:.86em; background:var(--surface-2); padding:.1em .35em; border-radius:3px}
+a{color:var(--accent); text-underline-offset:2px}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--accent); outline-offset:3px; border-radius:2px}
+
+/* ---- masthead ---- */
+header.top{padding:72px 0 8px}
+.rule{height:1px; background:var(--rule); border:0; margin:0}
+.meta{
+  display:flex; flex-wrap:wrap; gap:10px 28px; margin:26px 0 0;
+  font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-faint);
+  letter-spacing:.02em
+}
+.meta b{color:var(--ink-soft); font-weight:500}
+
+/* ---- sections ---- */
+section{padding:60px 0 0}
+.sec-head{display:flex; align-items:baseline; gap:16px; margin-bottom:22px}
+.sec-head .n{
+  font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink-faint);
+  font-weight:500; padding-top:6px
+}
+
+/* ---- figures ---- */
+figure{margin:0 0 8px}
+.scroller{overflow-x:auto; padding:6px 2px 10px; -webkit-overflow-scrolling:touch}
+.scroller svg{display:block; width:100%; min-width:760px; height:auto}
+figcaption{
+  font-size:13.5px; color:var(--ink-soft); max-width:70ch; line-height:1.5;
+  border-left:2px solid var(--rule); padding-left:12px; margin-top:6px
+}
+.svg-frame{background:var(--surface); border:1px solid var(--rule); border-radius:6px; padding:10px 14px}
+
+/* ---- code ---- */
+.code{
+  background:var(--surface); border:1px solid var(--rule); border-radius:6px;
+  overflow:hidden; margin:0 0 18px
+}
+.code-bar{
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+  padding:9px 16px; border-bottom:1px solid var(--rule); background:var(--surface-2);
+  font-family:"IBM Plex Mono",monospace; font-size:11.5px; letter-spacing:.03em;
+}
+.code-bar .f{color:var(--ink); font-weight:600}
+.code-bar .t{color:var(--ink-faint); text-transform:uppercase; letter-spacing:.12em; font-size:10px}
+.code pre{
+  margin:0; padding:16px 18px; overflow-x:auto;
+  font-size:12.8px; line-height:1.72; color:var(--ink)
+}
+.c{color:var(--ink-faint)}
+.req{color:var(--warn); font-weight:600}
+.add{color:var(--accent); font-weight:500}
+.del{color:var(--ink-faint); text-decoration:line-through}
+
+/* ---- grids ---- */
+.two{display:grid; grid-template-columns:1fr 1fr; gap:20px}
+.three{display:grid; grid-template-columns:repeat(3,1fr); gap:16px}
+@media(max-width:860px){.two,.three{grid-template-columns:1fr}}
+
+/* ---- state cards (versions file) ---- */
+.states{display:grid; grid-template-columns:repeat(3,1fr); gap:0; position:relative; margin-top:8px}
+.state{padding:0 20px; border-left:1px solid var(--rule)}
+.state:first-child{border-left:0; padding-left:0}
+.state .when{
+  font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.11em;
+  text-transform:uppercase; color:var(--ink-faint); margin-bottom:10px; display:block
+}
+.state .when b{color:var(--accent); font-weight:600}
+.state pre{
+  margin:0 0 10px; font-family:"IBM Plex Mono",monospace; font-size:12.4px; line-height:1.7;
+  background:var(--surface); border:1px solid var(--rule); border-radius:5px; padding:12px 14px;
+  overflow-x:auto; color:var(--ink)
+}
+.state p{font-size:13.5px; color:var(--ink-soft); line-height:1.5; margin:0}
+@media(max-width:860px){
+  .states{grid-template-columns:1fr}
+  .state{border-left:0; border-top:1px solid var(--rule); padding:20px 0 0}
+  .state:first-child{border-top:0; padding-top:0}
+}
+
+/* ---- notes ---- */
+.note{
+  border-left:2px solid var(--accent); background:var(--accent-soft);
+  padding:14px 18px; border-radius:0 5px 5px 0; margin:22px 0;
+  font-size:14.5px; line-height:1.55; max-width:72ch
+}
+.note.open{border-left-color:var(--warn); background:var(--warn-soft)}
+.note h3{margin-bottom:4px; font-size:13px; letter-spacing:.04em; text-transform:uppercase}
+.note p:last-child{margin-bottom:0}
+
+/* ---- key/value list ---- */
+dl.kv{margin:0; display:grid; grid-template-columns:auto 1fr; gap:0 22px; align-items:baseline}
+dl.kv dt{
+  font-family:"IBM Plex Mono",monospace; font-size:12.5px; color:var(--ink);
+  padding:9px 0; border-top:1px solid var(--rule); white-space:nowrap
+}
+dl.kv dd{margin:0; padding:9px 0; border-top:1px solid var(--rule); font-size:14.5px; color:var(--ink-soft)}
+dl.kv dt:first-of-type,dl.kv dd:first-of-type{border-top:0}
+@media(max-width:640px){
+  dl.kv{grid-template-columns:1fr; gap:0}
+  dl.kv dd{border-top:0; padding-top:0}
+}
+
+footer{padding:64px 0 0; font-size:13px; color:var(--ink-faint); font-family:"IBM Plex Mono",monospace}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <p class="eyebrow">cicada · scenario walkthrough</p>
+  <h1>The cicada release loop scenario 3</h1>
+  <p class="lede col">The same repo and the same service, now shipping release candidates before it ships the release. <span class="mono">prerelease-v1.5-rc</span> cuts <span class="mono">rc</span>s that testers can install; <span class="mono">main</span> cuts the stable. Both compute from the same anchor, and only one of them writes a changelog.</p>
+  <div class="meta">
+    <span><b>repo</b> acme/app</span>
+    <span><b>package</b> app</span>
+    <span><b>arrangement</b> prerelease line (#59)</span>
+    <span><b>prerelease-v1.5-rc</b> 1.5.0-rc.1 → rc.2</span>
+    <span><b>main</b> 1.4.2 → 1.5.0</span>
+  </div>
+</header>
+
+<section>
+  <div class="sec-head"><span class="n">01</span><div><h2>One line, two kinds of release</h2></div></div>
+  <div class="col"><p>A feature and a fix land on <span class="mono">prerelease-v1.5-rc</span>, each answered by an ordinary release PR &mdash; the same loop as scenario 1, except the version carries an <span class="mono">-rc.N</span> suffix and no changelog is written. When the line is ready, <span class="mono">prerelease-v1.5-rc</span> merges into <span class="mono">main</span> and the stable release is cut from the accumulated history.</p></div>
+
+  <figure>
+    <div class="svg-frame scroller">
+      <svg viewBox="0 0 1080 640" role="img" aria-label="Git graph: prerelease-v1.5-rc is cut from the v1.4.2 tag on main. A feat lands on it and cicada's release PR merges back as v1.5.0-rc.1; a fix lands and the next release PR merges as v1.5.0-rc.2. prerelease-v1.5-rc is then merged into main, where cicada's release PR cuts the stable v1.5.0. Two brackets show that the rc releases and the stable release all compute from the same v1.4.2 anchor.">
+        <defs>
+          <marker id="p1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="p1t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+        </defs>
+
+        <line x1="220" y1="212" x2="1040" y2="212" stroke="var(--rule)" stroke-dasharray="1 6" stroke-width="1.5"/>
+        <line x1="220" y1="432" x2="1040" y2="432" stroke="var(--rule)" stroke-dasharray="1 6" stroke-width="1.5"/>
+
+        <g font-family="IBM Plex Mono, monospace" font-size="11" text-anchor="end">
+          <text x="196" y="144" fill="var(--ink-soft)">main</text>
+          <text x="196" y="216" fill="var(--accent)">cicada/main</text>
+          <text x="196" y="364" fill="var(--ink-soft)">prerelease-v1.5-rc</text>
+          <text x="196" y="436" fill="var(--accent)">cicada/prerelease-v1.5-rc</text>
+        </g>
+
+        <!-- main spine -->
+        <line x1="220" y1="140" x2="1040" y2="140" stroke="currentColor" stroke-width="2"/>
+
+        <!-- prerelease-v1.5-rc is cut from v1.4.2 -->
+        <path d="M260,140 C320,140 300,360 380,360" fill="none" stroke="currentColor" stroke-width="2"/>
+        <line x1="380" y1="360" x2="740" y2="360" stroke="currentColor" stroke-width="2"/>
+
+        <!-- rc release PR 1 -->
+        <path d="M380,360 C430,360 400,432 476,432" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#p1t)"/>
+        <path d="M480,432 C540,432 530,360 496,360" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#p1)"/>
+        <!-- rc release PR 2 -->
+        <path d="M620,360 C670,360 640,432 716,432" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#p1t)"/>
+        <path d="M720,432 C780,432 770,360 736,360" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#p1)"/>
+
+        <!-- promotion: prerelease-v1.5-rc merged into main -->
+        <path d="M740,360 C800,360 800,140 856,140" fill="none" stroke="currentColor" stroke-width="2.4" marker-end="url(#p1)"/>
+        <!-- stable release PR -->
+        <path d="M860,140 C900,140 880,212 926,212" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#p1t)"/>
+        <path d="M930,212 C980,212 970,140 996,140" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#p1)"/>
+
+        <!-- commits -->
+        <circle cx="260" cy="140" r="7.5" fill="currentColor"/>
+        <circle cx="860" cy="140" r="7.5" fill="currentColor"/>
+        <circle cx="1000" cy="140" r="7.5" fill="currentColor"/>
+        <circle cx="930" cy="212" r="7.5" fill="var(--accent)"/>
+        <circle cx="380" cy="360" r="7.5" fill="currentColor"/>
+        <circle cx="500" cy="360" r="7.5" fill="currentColor"/>
+        <circle cx="620" cy="360" r="7.5" fill="currentColor"/>
+        <circle cx="740" cy="360" r="7.5" fill="currentColor"/>
+        <circle cx="480" cy="432" r="7.5" fill="var(--accent)"/>
+        <circle cx="720" cy="432" r="7.5" fill="var(--accent)"/>
+
+        <!-- main tags -->
+        <line x1="260" y1="126" x2="260" y2="133" stroke="var(--ink-faint)" stroke-width="1.5"/>
+        <rect x="224" y="104" width="72" height="22" rx="4" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="260" y="119" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)" text-anchor="middle">v1.4.2</text>
+
+        <line x1="1000" y1="126" x2="1000" y2="133" stroke="var(--accent)" stroke-width="1.5"/>
+        <rect x="964" y="104" width="72" height="22" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="1000" y="119" font-family="IBM Plex Mono, monospace" font-size="10.5" font-weight="600" fill="var(--accent)" text-anchor="middle">v1.5.0</text>
+
+        <!-- main commit labels -->
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5" text-anchor="middle" fill="currentColor">
+          <text x="820" y="76">prerelease-v1.5-rc merged into main</text>
+        </g>
+        <line x1="820" y1="84" x2="860" y2="133" stroke="var(--ink-faint)" stroke-width="1.2"/>
+
+        <!-- prerelease-v1.5-rc commit labels -->
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5" text-anchor="middle" fill="currentColor">
+          <text x="380" y="288">c1 · feat: add token refresh</text>
+          <text x="620" y="288">c2 · fix: reject empty auth header</text>
+        </g>
+        <g stroke="var(--ink-faint)" stroke-width="1.2">
+          <line x1="380" y1="296" x2="380" y2="353"/>
+          <line x1="620" y1="296" x2="620" y2="353"/>
+        </g>
+
+        <!-- rc tags -->
+        <line x1="500" y1="346" x2="500" y2="353" stroke="var(--accent)" stroke-width="1.5"/>
+        <rect x="446" y="320" width="108" height="22" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="500" y="335" font-family="IBM Plex Mono, monospace" font-size="10.5" font-weight="600" fill="var(--accent)" text-anchor="middle">v1.5.0-rc.1</text>
+
+        <line x1="740" y1="346" x2="740" y2="353" stroke="var(--accent)" stroke-width="1.5"/>
+        <rect x="686" y="320" width="108" height="22" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="740" y="335" font-family="IBM Plex Mono, monospace" font-size="10.5" font-weight="600" fill="var(--accent)" text-anchor="middle">v1.5.0-rc.2</text>
+
+        <!-- release PR captions -->
+        <g font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--accent)" text-anchor="middle">
+          <text x="480" y="460">proposes 1.5.0-rc.1</text>
+          <text x="720" y="460">proposes 1.5.0-rc.2</text>
+          <text x="930" y="240">proposes 1.5.0</text>
+        </g>
+        <text x="930" y="256" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle">stable — writes the changelog</text>
+
+        <!-- cut annotation -->
+        <text x="220" y="390" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-soft)">cut at v1.4.2</text>
+        <text x="220" y="406" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)">git checkout -b prerelease-v1.5-rc</text>
+
+        <!-- range brackets -->
+        <g stroke="var(--accent)" stroke-width="1.6">
+          <line x1="260" y1="510" x2="740" y2="510"/><line x1="260" y1="504" x2="260" y2="516"/><line x1="740" y1="504" x2="740" y2="516"/>
+          <line x1="260" y1="556" x2="1000" y2="556"/><line x1="260" y1="550" x2="260" y2="562"/><line x1="1000" y1="550" x2="1000" y2="562"/>
+        </g>
+        <text x="500" y="530" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--accent)" text-anchor="middle">every rc computes v1.4.2..HEAD</text>
+        <text x="630" y="576" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--accent)" text-anchor="middle">and so does the stable — same anchor, never the last rc</text>
+
+        <!-- legend -->
+        <line x1="220" y1="598" x2="1040" y2="598" stroke="var(--rule)"/>
+        <circle cx="228" cy="620" r="6" fill="currentColor"/>
+        <text x="242" y="624" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)">human</text>
+        <circle cx="330" cy="620" r="6" fill="var(--accent)"/>
+        <text x="344" y="624" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)">cicada</text>
+        <rect x="440" y="613" width="16" height="14" rx="3" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="466" y="624" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)">tag cicada created — an rc tag is a tag like any other</text>
+      </svg>
+    </div>
+    <figcaption>Four release PRs in one picture, and only the last one touches <span class="mono">CHANGELOG.md</span>. The two brackets are the whole idea: <span class="mono">v1.4.2</span> is the anchor for every computation here, so each rc&rsquo;s notes and the final stable notes are cumulative since the last <em>stable</em> release &mdash; not since the last release.</figcaption>
+  </figure>
+
+  <div class="note col">
+    <h3>What Phase B does on an rc</h3>
+    <p>Exactly what it does anywhere else. The versions file carries a <span class="mono">prerelease</span> field, so Phase B reconciles <em>that</em> tag &mdash; <span class="mono">v1.5.0-rc.1</span> &mdash; against the same reachability and collision rules as a stable one, then creates the release object. On GitHub it is flagged <span class="mono">prerelease: true</span>; GitLab has no such field, so the adapter marks it in the release name instead. Same class of gap as draft PRs.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">02</span><div><h2>The anchor is the last stable, never the last release</h2></div></div>
+  <div class="col"><p>This is the one rule the whole prerelease design exists to protect, and it is easiest to see by asking what the obvious alternative would have produced.</p></div>
+
+  <figure>
+    <div class="svg-frame scroller">
+      <svg viewBox="0 0 1080 400" role="img" aria-label="A timeline from the v1.4.2 tag through a feat, rc.1, a fix and rc.2 to the stable release. The accent bracket spans the whole timeline from v1.4.2 and yields 1.5.0 notes containing both the feature and the fix. The warning bracket spans only from rc.2 and yields 1.5.0 notes containing the fix alone, with the feature missing.">
+        <line x1="220" y1="112" x2="980" y2="112" stroke="currentColor" stroke-width="2"/>
+
+        <g font-family="IBM Plex Mono, monospace" font-size="10.5" text-anchor="middle">
+          <text x="240" y="60" fill="var(--ink-soft)">v1.4.2</text>
+          <text x="240" y="76" fill="var(--ink-faint)">last stable</text>
+          <text x="420" y="68" fill="var(--ink)">c1 feat</text>
+          <text x="600" y="68" fill="var(--accent)">v1.5.0-rc.1</text>
+          <text x="780" y="68" fill="var(--ink)">c2 fix</text>
+          <text x="900" y="68" fill="var(--accent)">v1.5.0-rc.2</text>
+        </g>
+        <g stroke="var(--ink-faint)" stroke-width="1.2">
+          <line x1="240" y1="84" x2="240" y2="105"/>
+          <line x1="420" y1="76" x2="420" y2="105"/>
+          <line x1="600" y1="76" x2="600" y2="105"/>
+          <line x1="780" y1="76" x2="780" y2="105"/>
+          <line x1="900" y1="76" x2="900" y2="105"/>
+        </g>
+        <circle cx="240" cy="112" r="6.5" fill="currentColor"/>
+        <circle cx="420" cy="112" r="6.5" fill="currentColor"/>
+        <circle cx="600" cy="112" r="6.5" fill="var(--accent)"/>
+        <circle cx="780" cy="112" r="6.5" fill="currentColor"/>
+        <circle cx="900" cy="112" r="6.5" fill="var(--accent)"/>
+        <text x="980" y="116" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-soft)">cut 1.5.0</text>
+
+        <!-- cicada's answer -->
+        <g stroke="var(--accent)" stroke-width="1.8">
+          <line x1="240" y1="172" x2="960" y2="172"/><line x1="240" y1="165" x2="240" y2="179"/><line x1="960" y1="165" x2="960" y2="179"/>
+        </g>
+        <text x="240" y="158" font-family="Bricolage Grotesque, sans-serif" font-size="12" font-weight="700" letter-spacing="1.1" fill="var(--accent)">CICADA — ANCHOR ON THE LAST STABLE</text>
+        <rect x="240" y="190" width="720" height="44" rx="5" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="262" y="217" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--accent)">1.5.0 notes contain the feat and the fix — complete, and the same text rc.2 already showed testers</text>
+
+        <!-- the alternative -->
+        <g stroke="var(--warn)" stroke-width="1.8">
+          <line x1="900" y1="290" x2="960" y2="290"/><line x1="900" y1="283" x2="900" y2="297"/><line x1="960" y1="283" x2="960" y2="297"/>
+        </g>
+        <text x="240" y="276" font-family="Bricolage Grotesque, sans-serif" font-size="12" font-weight="700" letter-spacing="1.1" fill="var(--warn)">THE ALTERNATIVE — ANCHOR ON THE LAST RELEASE OF ANY KIND</text>
+        <rect x="240" y="308" width="720" height="62" rx="5" fill="var(--warn-soft)" stroke="var(--warn)"/>
+        <text x="262" y="332" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--warn)">the range is rc.2..HEAD — a single fix</text>
+        <text x="262" y="353" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">the feature that motivated the entire release is absent from the 1.5.0 notes</text>
+      </svg>
+    </div>
+    <figcaption>Anchoring on the newest tag is the intuitive reading, and it silently truncates the release notes of every version that had an rc. Keeping <span class="mono">version</span> pinned to the last stable makes cumulative notes fall out for free rather than needing to be assembled.</figcaption>
+  </figure>
+
+  <div class="note col">
+    <h3>Which is why <span class="mono">version</span> does not move during an rc line</h3>
+    <p>The field keeps its exact meaning from scenario 1 &mdash; <em>last stable release</em> &mdash; and that is what makes anchor resolution, range computation and the collision check apply to prereleases with no special case at all. The rc number lives in a second field that is deliberately not the anchor. Nothing in the anchor machinery learned a new rule.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">03</span><div><h2>What the counter does</h2></div></div>
+  <div class="col"><p>Each run computes the target <em>stable</em> version from the commits as usual, then attaches <span class="mono">-rc.N</span>. Whether <span class="mono">N</span> increments or resets is decided by that base, never by a stored count.</p></div>
+
+  <figure>
+    <div class="svg-frame scroller">
+      <svg viewBox="0 0 1080 440" role="img" aria-label="Three tracks starting from an open 1.5.0-rc.1 line. A fix recomputes the base as 1.5.0, unchanged, so the counter increments to rc.2. A second feat also recomputes the base as 1.5.0, still unchanged, so it increments to rc.3. A breaking change recomputes the base as 2.0.0, which has changed, so the counter resets to 2.0.0-rc.1.">
+        <defs>
+          <marker id="p3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ink-faint)"/></marker>
+        </defs>
+
+        <text x="40" y="26" font-family="Bricolage Grotesque, sans-serif" font-size="12" font-weight="700" letter-spacing="1.2" fill="var(--ink-faint)">GIVEN AN OPEN LINE AT 1.5.0-rc.1, THE NEXT COMMIT DECIDES</text>
+
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5">
+          <!-- track A -->
+          <rect x="40" y="44" width="320" height="38" rx="5" fill="var(--surface-2)" stroke="var(--rule)"/>
+          <text x="200" y="68" fill="var(--ink)" text-anchor="middle">fix: reject empty auth header</text>
+          <line x1="200" y1="82" x2="200" y2="104" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#p3)"/>
+          <rect x="40" y="108" width="320" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="200" y="135" fill="var(--ink-soft)" text-anchor="middle">base from v1.4.2..HEAD → 1.5.0</text>
+          <line x1="200" y1="152" x2="200" y2="174" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#p3)"/>
+          <rect x="40" y="178" width="320" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="200" y="205" fill="var(--ink-soft)" text-anchor="middle">base unchanged</text>
+          <line x1="200" y1="222" x2="200" y2="244" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#p3)"/>
+          <rect x="40" y="248" width="320" height="58" rx="5" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="200" y="272" fill="var(--accent)" font-weight="600" text-anchor="middle">1.5.0-rc.2</text>
+          <text x="200" y="291" font-size="10.5" fill="var(--ink-soft)" text-anchor="middle">counter increments</text>
+
+          <!-- track B -->
+          <rect x="380" y="44" width="320" height="38" rx="5" fill="var(--surface-2)" stroke="var(--rule)"/>
+          <text x="540" y="68" fill="var(--ink)" text-anchor="middle">a second feat: lands</text>
+          <line x1="540" y1="82" x2="540" y2="104" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#p3)"/>
+          <rect x="380" y="108" width="320" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="540" y="135" fill="var(--ink-soft)" text-anchor="middle">base from v1.4.2..HEAD → 1.5.0</text>
+          <line x1="540" y1="152" x2="540" y2="174" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#p3)"/>
+          <rect x="380" y="178" width="320" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="540" y="199" fill="var(--ink-soft)" text-anchor="middle">still unchanged — a second minor</text>
+          <text x="540" y="214" fill="var(--ink-soft)" text-anchor="middle">does not move a minor again</text>
+          <line x1="540" y1="222" x2="540" y2="244" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#p3)"/>
+          <rect x="380" y="248" width="320" height="58" rx="5" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="540" y="272" fill="var(--accent)" font-weight="600" text-anchor="middle">1.5.0-rc.3</text>
+          <text x="540" y="291" font-size="10.5" fill="var(--ink-soft)" text-anchor="middle">counter increments</text>
+
+          <!-- track C -->
+          <rect x="720" y="44" width="320" height="38" rx="5" fill="var(--surface-2)" stroke="var(--rule)"/>
+          <text x="880" y="68" fill="var(--ink)" text-anchor="middle">feat!: drop the v1 endpoints</text>
+          <line x1="880" y1="82" x2="880" y2="104" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#p3)"/>
+          <rect x="720" y="108" width="320" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="880" y="135" fill="var(--ink-soft)" text-anchor="middle">base from v1.4.2..HEAD → 2.0.0</text>
+          <line x1="880" y1="152" x2="880" y2="174" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#p3)"/>
+          <rect x="720" y="178" width="320" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="880" y="205" fill="var(--ink-soft)" text-anchor="middle">base changed — 1.5.0 → 2.0.0</text>
+          <line x1="880" y1="222" x2="880" y2="244" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#p3)"/>
+          <rect x="720" y="248" width="320" height="58" rx="5" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="880" y="272" fill="var(--accent)" font-weight="600" text-anchor="middle">2.0.0-rc.1</text>
+          <text x="880" y="291" font-size="10.5" fill="var(--ink-soft)" text-anchor="middle">counter resets — not rc.3</text>
+        </g>
+
+        <rect x="40" y="336" width="1000" height="82" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-dasharray="5 4"/>
+        <text x="62" y="362" font-family="Bricolage Grotesque, sans-serif" font-size="12" font-weight="700" letter-spacing="1.2" fill="var(--accent)">WHY THE AWKWARD CASE HANDLES ITSELF</text>
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">
+          <text x="62" y="386">the base is recomputed from scratch every run, so nothing has to notice that a breaking change arrived</text>
+          <text x="62" y="406">2.0.0-rc.3 would be the bug: a counter continuing across a version it never belonged to</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Dotted numbering (<span class="mono">-rc.1</span>, not <span class="mono">-rc1</span>) is what makes these sort numerically under semver, so <span class="mono">rc.10</span> follows <span class="mono">rc.9</span> rather than preceding <span class="mono">rc.2</span>. The identifier itself is a free string &mdash; <span class="mono">prerelease_identifier = "beta"</span> cuts <span class="mono">1.5.0-beta.N</span> instead. One line and one identifier, though: a <span class="mono">beta</span> stage feeding an <span class="mono">rc</span> stage is not something cicada expresses, because it draws no distinction between the two beyond the string itself.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">04</span><div><h2>cicada.toml</h2></div></div>
+  <div class="col"><p>The whole file, so this scenario stands on its own &mdash; and it is <strong>byte-identical to scenario 1&rsquo;s</strong> but for the one wider glob in <span class="mono">release_branches</span>. The prerelease line needs no stanza at all, because the built-in default already maps it.</p></div>
+
+  <div class="code">
+    <div class="code-bar"><span class="f">cicada.toml</span><span class="t">on main &middot; and on prerelease-v1.5-rc, byte-identical</span></div>
+<pre><span class="c"># acme/app — one Rust service, one prerelease line, no umbrella</span>
+
+[settings]
+<span class="c"># which branches cicada acts on; the gate — a non-match exits 0 quietly (#26)</span>
+release_branches  = ["main", "prerelease-*"]
+
+default_scope     = "app"                     <span class="req">&lt;- required</span> <span class="c">unscoped commits land here</span>
+committer         = "cicada[bot] &lt;cicada@users.noreply.github.com&gt;"
+commit_source     = "commits"                 <span class="c"># --no-merges; identical on squash/rebase repos</span>
+
+<span class="c"># the release PR cicada opens — its head branch and its title</span>
+release_pr_branch = "cicada/{branch}"         <span class="c"># renders cicada/prerelease-v1.5-rc here</span>
+release_pr_title  = "chore(release): prepare release"
+
+<span class="c"># no prerelease_branches / prerelease_identifier — the defaults are already
+# ["prerelease/**", "prerelease-*"] and "rc", which is what this line wants (#83)
+# one line, one identifier: set prerelease_identifier = "beta" to cut betas
+# instead, but never both at once (#84)
+# no maintenance_branches either — its default, "maintenance/**" and
+# "maintenance-*", matches nothing in this repo</span>
+
+[forge]
+kind = "github"                              <span class="req">&lt;- required</span> <span class="c">never guessed at release time</span>
+repo = "acme/app"                            <span class="c"># optional — derived from origin when absent</span>
+
+<span class="c"># `bump` decides whether a type justifies a release at all.
+# `title` / `hidden` only decide how it renders.</span>
+[changelog]
+sections = [
+  { type = "feat",  title = "Features",      bump = "minor" },
+  { type = "fix",   title = "Bug Fixes",     bump = "patch" },
+  { type = "perf",  title = "Performance",   bump = "patch" },
+  { type = "docs",  title = "Documentation", bump = "none"  },
+  { type = "chore", title = "Chores",        bump = "none", hidden = true },
+]
+
+[packages.app]                               <span class="req">&lt;- required</span> <span class="c">the package list is explicit, always</span>
+path       = "."
+tag_format = "v{version}"                    <span class="c"># v1.5.0-rc.1 and v1.5.0 come out of one format</span>
+changelog  = "CHANGELOG.md"
+
+[[packages.app.updaters]]
+kind = "cargo"
+path = "Cargo.toml"
+
+<span class="c"># no [umbrella] — a single-service repo has no aggregate version to declare</span>
+</pre>
+  </div>
+
+  <div class="two" style="margin-top:26px">
+    <div>
+      <h3>What makes a branch a prerelease line</h3>
+      <dl class="kv">
+        <dt>release_branches</dt><dd>Must list it, and has <strong>no default</strong>. A branch matching <span class="mono">prerelease-*</span> but absent here exits 0 quietly — the interlock that bounds what a defaulted classifier can do.</dd>
+        <dt>prerelease_branches</dt><dd>A glob list, same shape as <span class="mono">maintenance_branches</span>. Defaulted to <span class="mono">prerelease/**</span> and <span class="mono">prerelease-*</span>.</dd>
+        <dt>prerelease_identifier</dt><dd>One scalar, defaulted to <span class="mono">rc</span>. One line has one identifier, so there is no per-branch mapping and no precedence rule.</dd>
+        <dt>main</dt><dd>Matches no pattern, so it cuts stable. That is the entire difference between the two lines.</dd>
+        <dt>--prerelease rc</dt><dd>Ad-hoc on any branch, no config stanza needed; overrides the pattern where both apply.</dd>
+      </dl>
+    </div>
+    <div>
+      <h3>Why it is branch-level, not per-package</h3>
+      <dl class="kv">
+        <dt>the cost</dt><dd>Nothing new. It reuses the same pattern machinery as <span class="mono">release_branches</span>.</dd>
+        <dt>per-package</dt><dd>Would make an umbrella incoherent — aggregation has no meaning with some children on rc and others not.</dd>
+        <dt>here</dt><dd>One package, so the distinction is invisible &mdash; which is the point: the same rule scales to a monorepo unchanged.</dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="note col">
+    <h3>It has to be a pattern, not a value on the branch</h3>
+    <p>Putting <span class="mono">prerelease = "rc"</span> in <span class="mono">prerelease-v1.5-rc</span>&rsquo;s own <span class="mono">cicada.toml</span> reads like it would work, and it does not: promoting the line merges <span class="mono">prerelease-v1.5-rc</span> into <span class="mono">main</span>, and that merge brings the config file along. <span class="mono">main</span> would start cutting rcs, and the only escape would be hand-resolving the config on every promotion &mdash; exactly the step that gets missed. With a pattern, both branches carry the same bytes, the merge is a no-op on the config, and <span class="mono">main</span> cuts <span class="mono">1.5.0</span> because it simply does not match <span class="mono">prerelease-*</span>.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">05</span><div><h2>.cicada-versions.toml</h2></div></div>
+  <div class="col"><p>The prerelease line is the only thing that ever puts a second key in this file &mdash; and it is a key that is pointedly <em>not</em> the anchor.</p></div>
+
+  <div class="states">
+    <div class="state">
+      <span class="when">before the line opens</span>
+      <pre>[packages.app]
+version = "1.4.2"</pre>
+      <p>Identical on <span class="mono">main</span> and on <span class="mono">prerelease-v1.5-rc</span> the moment it is cut. No <span class="mono">prerelease</span> key, because no rc line is open.</p>
+    </div>
+    <div class="state">
+      <span class="when">while the line is open · on <b>prerelease-v1.5-rc</b></span>
+      <pre>[packages.app]
+version    = "1.4.2"
+<span class="add">prerelease = "1.5.0-rc.2"</span></pre>
+      <p><span class="mono">version</span> has not moved and must not &mdash; it is the anchor every computation here starts from. <span class="mono">prerelease</span> records only which rc is current.</p>
+    </div>
+    <div class="state">
+      <span class="when">after promotion · on <b>main</b></span>
+      <pre>[packages.app]
+version = <span class="add">"1.5.0"</span></pre>
+      <p>The stable release rewrites <span class="mono">version</span> and <strong>deletes</strong> <span class="mono">prerelease</span> outright. The anchor moves exactly once per stable release, however many rcs preceded it.</p>
+    </div>
+  </div>
+
+  <div class="note col" style="margin-top:34px">
+    <h3>Two fields, one of which is load-bearing</h3>
+    <p>Everything that reads this file for an anchor reads <span class="mono">version</span>, and it means the same thing on every branch whether an rc line is open or not. Phase B is the only place <span class="mono">prerelease</span> changes behaviour: present, it reconciles the rc tag; absent, the stable one. That is the whole of the special-casing.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">06</span><div><h2>What a prerelease does not write</h2></div></div>
+  <div class="col"><p>An rc is a real release &mdash; version files written, tag cut, forge release created, artifact buildable. It stops one file short.</p></div>
+
+  <figure>
+    <div class="svg-frame scroller">
+      <svg viewBox="0 0 1080 470" role="img" aria-label="Two release commits compared. Cicada's rc release commit on prerelease-v1.5-rc touches Cargo.toml and the versions file but not CHANGELOG.md. Cicada's stable release commit on main touches all three. Below, a warning strip shows what a changelog would look like if every release wrote an entry: the 1.5.0 entry, then rc.2 repeating it, then rc.1 repeating part of it.">
+        <text x="60" y="30" font-family="Bricolage Grotesque, sans-serif" font-size="12" font-weight="700" letter-spacing="1.2" fill="var(--ink-faint)">THE SAME TOOL, TWO RELEASE COMMITS</text>
+
+        <!-- rc commit -->
+        <rect x="60" y="48" width="460" height="186" rx="6" fill="var(--surface)" stroke="var(--accent)"/>
+        <text x="82" y="76" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600" fill="var(--accent)">R2 · chore(release): v1.5.0-rc.2</text>
+        <text x="82" y="95" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)">written by cicada, on prerelease-v1.5-rc</text>
+        <line x1="82" y1="108" x2="498" y2="108" stroke="var(--rule)"/>
+        <text x="82" y="132" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">writes</text>
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink)">
+          <text x="170" y="132">Cargo.toml</text>
+          <text x="170" y="152">.cicada-versions.toml</text>
+        </g>
+        <text x="82" y="184" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">skips</text>
+        <text x="170" y="184" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-faint)" text-decoration="line-through">CHANGELOG.md</text>
+        <text x="82" y="212" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)">byte-identical after the run — asserted, not incidental</text>
+
+        <!-- stable commit -->
+        <rect x="560" y="48" width="460" height="186" rx="6" fill="var(--surface)" stroke="var(--accent)"/>
+        <text x="582" y="76" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600" fill="var(--accent)">R3 · chore(release): v1.5.0</text>
+        <text x="582" y="95" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)">written by cicada, on main</text>
+        <line x1="582" y1="108" x2="998" y2="108" stroke="var(--rule)"/>
+        <text x="582" y="132" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink-soft)">writes</text>
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--ink)">
+          <text x="670" y="132">Cargo.toml</text>
+          <text x="670" y="152">.cicada-versions.toml</text>
+          <text x="670" y="172">CHANGELOG.md</text>
+        </g>
+        <text x="582" y="212" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)">one entry, covering everything since v1.4.2</text>
+
+        <!-- counterfactual -->
+        <rect x="60" y="262" width="960" height="186" rx="6" fill="var(--warn-soft)" stroke="var(--warn)"/>
+        <text x="82" y="290" font-family="Bricolage Grotesque, sans-serif" font-size="12" font-weight="700" letter-spacing="1.2" fill="var(--warn)">WHAT THE FILE WOULD LOOK LIKE IF EVERY RELEASE WROTE AN ENTRY</text>
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5">
+          <text x="82" y="318" fill="var(--ink)">## 1.5.0</text>
+          <text x="300" y="318" fill="var(--ink-soft)">feat: add token refresh · fix: reject empty auth header</text>
+          <text x="82" y="344" fill="var(--ink)">## 1.5.0-rc.2</text>
+          <text x="300" y="344" fill="var(--warn)">the same two lines again</text>
+          <text x="82" y="370" fill="var(--ink)">## 1.5.0-rc.1</text>
+          <text x="300" y="370" fill="var(--warn)">and the feat a third time</text>
+          <text x="82" y="396" fill="var(--ink-faint)">## 1.4.2</text>
+        </g>
+        <text x="82" y="428" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-soft)">cumulative notes are right for a tester reading one release, and wrong for a file read top to bottom</text>
+      </svg>
+    </div>
+    <figcaption>The rc notes and the stable notes are the same cumulative text &mdash; that is the point of anchoring on the last stable. Writing that text into the changelog once per release would stack three overlapping entries for one release. So the file collects stable releases only, and stays linear.</figcaption>
+  </figure>
+
+  <div class="col" style="margin-top:26px"><p>The rc release PR, then, is the scenario&nbsp;1 diff with one panel missing. <span class="mono">Cargo.toml</span> carries the prerelease version outright &mdash; that is what makes <span class="mono">cargo build</span> stamp the binary <span class="mono">1.5.0-rc.1</span>, and what a tester ends up installing.</p></div>
+
+  <div class="three">
+    <div class="code">
+      <div class="code-bar"><span class="f">Cargo.toml</span><span class="t">cargo updater</span></div>
+<pre> [package]
+ name = "app"
+<span class="del">-version = "1.4.2"</span>
+<span class="add">+version = "1.5.0-rc.1"</span>
+ edition = "2024"</pre>
+    </div>
+    <div class="code">
+      <div class="code-bar"><span class="f">.cicada-versions.toml</span><span class="t">tool-owned</span></div>
+<pre> [packages.app]
+ version    = "1.4.2"
+<span class="add">+prerelease = "1.5.0-rc.1"</span></pre>
+    </div>
+    <div class="code">
+      <div class="code-bar"><span class="f">CHANGELOG.md</span><span class="t">not in the diff</span></div>
+<pre><span class="c"> # Changelog
+
+ &lt;!-- cicada:insert --&gt;
+
+ ## 1.4.2 (2026-08-02)
+ …</span>
+
+<span class="c"># byte-identical</span></pre>
+    </div>
+  </div>
+
+  <div class="note col">
+    <h3>The two files disagree on purpose</h3>
+    <p>During an rc line <span class="mono">Cargo.toml</span> reads <span class="mono">1.5.0-rc.1</span> while the versions file still reads <span class="mono">version = "1.4.2"</span>. That looks like drift and is not: the versions file is the sole source of truth and <span class="mono">Cargo.toml</span> is an <em>output</em>, never read back to seed a computation. <span class="mono">version</span> is answering &ldquo;where does the range start&rdquo;, the manifest is answering &ldquo;what does this build call itself&rdquo;, and during a prerelease those are genuinely different questions. The field the manifest matches is <span class="mono">prerelease</span>.</p>
+  </div>
+
+  <div class="code">
+    <div class="code-bar"><span class="f">CHANGELOG.md</span><span class="t">on main, after promotion — the first and only entry</span></div>
+<pre> # Changelog
+
+ &lt;!-- cicada:insert --&gt;
+<span class="add">+## 1.5.0 (2026-09-12)</span>
+<span class="add">+</span>
+<span class="add">+### Features</span>
+<span class="add">+* add token refresh (a1b2c3d)</span>
+<span class="add">+</span>
+<span class="add">+### Bug Fixes</span>
+<span class="add">+* reject empty auth header (e4f5a6b)</span>
+
+ ## 1.4.2 (2026-08-02)</pre>
+  </div>
+
+  <div class="note col">
+    <h3>The notes are still visible while the line is open</h3>
+    <p>Skipping the file does not hide anything. Each rc&rsquo;s release PR body and its forge release notes carry the full cumulative text since <span class="mono">v1.4.2</span>, which is exactly what a tester installing <span class="mono">1.5.0-rc.2</span> wants to read. <span class="mono">cicada plan</span> on <span class="mono">prerelease-v1.5-rc</span> says so too, reporting the rc version <em>and</em> that <span class="mono">CHANGELOG.md</span> will not be written &mdash; a silently skipped file write reads as a bug.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="n">07</span><div><h2>Promotion</h2></div></div>
+  <div class="col"><p>There is no promote command. <span class="mono">prerelease-v1.5-rc</span> merges into <span class="mono">main</span> like any other branch, and <span class="mono">main</span> &mdash; matching no prerelease pattern &mdash; does what it always does.</p></div>
+
+  <dl class="kv" style="max-width:74ch; margin-bottom:30px">
+    <dt>Phase B first</dt><dd>The merged versions file still carries <span class="mono">prerelease</span>, so Phase B reconciles <span class="mono">v1.5.0-rc.2</span> &mdash; already tagged, already released, a no-op.</dd>
+    <dt>anchor</dt><dd><span class="mono">version</span> is still <span class="mono">1.4.2</span>, so the range is <span class="mono">v1.4.2..HEAD</span> &mdash; the same range rc.2 used.</dd>
+    <dt>plan</dt><dd><span class="mono">1.4.2 → 1.5.0</span>. The rc suffix is not carried over; it was never part of the base.</dd>
+    <dt>the diff</dt><dd><span class="mono">Cargo.toml</span> <span class="mono">1.5.0-rc.2 → 1.5.0</span>, one changelog entry, <span class="mono">prerelease</span> deleted.</dd>
+  </dl>
+
+  <div class="note col">
+    <h3>cicada&rsquo;s own rc commits ride along, and are inert</h3>
+    <p>The merge brings <span class="mono">R1</span> and <span class="mono">R2</span> onto <span class="mono">main</span> with everything else, so they sit inside the <span class="mono">v1.4.2..HEAD</span> range that computes the stable release. They change nothing: <span class="mono">chore(release):</span> is a <span class="mono">chore</span>, whose section is <span class="mono">bump = "none", hidden = true</span> &mdash; it cannot justify a release and it cannot appear in an entry. The release PR title being conventional and non-releasable is what makes the promotion diff clean.</p>
+  </div>
+
+  <div class="note col">
+    <h3>Decided &mdash; the line is the operator&rsquo;s to retire</h3>
+    <p>The <span class="mono">prerelease</span> key is deleted by the stable release, but that deletion is a commit on <span class="mono">main</span>. Until <span class="mono">main</span> is merged back into <span class="mono">prerelease-v1.5-rc</span> &mdash; or the branch is re-cut &mdash; <span class="mono">prerelease-v1.5-rc</span> still reads <span class="mono">version = "1.4.2"</span>, <span class="mono">prerelease = "1.5.0-rc.2"</span>. A new <span class="mono">feat:</span> there recomputes the same base <span class="mono">1.5.0</span>, finds it unchanged, and cuts <span class="mono">v1.5.0-rc.3</span> &mdash; an rc for a version that has already shipped, and one that sorts <em>below</em> it.</p>
+    <p>cicada does <strong>not</strong> detect this (#91). It acts on what the branch and the config say, and this branch says an rc line is open. Refusing would mean extending the collision check from the tag being created to the computed stable base &mdash; machinery added to notice a branch its operator stopped maintaining. The fix is a <strong>fast-forward</strong>: the line&rsquo;s tip is already an ancestor of <span class="mono">main</span>, so merging <span class="mono">main</span> back conflicts on nothing, and afterwards the line reads <span class="mono">1.5.0</span> with no <span class="mono">prerelease</span> key and the counter resets.</p>
+  </div>
+</section>
+
+<footer>
+  <hr class="rule" style="margin-bottom:20px">
+  scenario 3 · derived from docs/design.md §Prereleases and docs/scenarios/single-service.md group F
+</footer>
+
+</div>
