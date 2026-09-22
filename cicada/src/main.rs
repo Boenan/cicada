@@ -694,7 +694,7 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
     }
 
     // 8. Reset the head branch to HEAD, apply the edits, commit.
-    let message = commit_message(cfg, &p.plan);
+    let message = commit_message(cfg, &p.ctx.branch, &p.plan);
     let outcome = p.ctx.repo.commit_edits(&git::CommitRequest {
         branch: &head_branch,
         base: "HEAD",
@@ -734,7 +734,13 @@ fn cmd_release_pr(cli: &Cli, dry_run: bool, no_push: bool) -> anyhow::Result<u8>
         head: head_branch.clone(),
         // The base is the branch cicada ran on, never a fixed default (#27).
         base: p.ctx.branch.clone(),
-        title: cfg.settings.release_pr_title.clone(),
+        // Rendered, so a reviewer scanning a PR list can see which release is
+        // being proposed without opening it (#86).
+        title: cicada_core::plan::render_pr_title(
+            &cfg.settings.release_pr_title,
+            &p.ctx.branch,
+            &p.plan,
+        ),
         body: pr_body(&p.plan, &rendered.notes),
     };
 
@@ -1021,12 +1027,17 @@ fn collision_check(p: &Prepared) -> anyhow::Result<Option<u8>> {
 
 /// The release commit's message.
 ///
-/// The subject is `release_pr_title`, which is conventional and **non-releasable**
-/// (#41, #36) — so cicada's own release commit cannot trigger a release on the
-/// next run. The body lists what moved, in config order (#31), because `git show`
+/// The subject is `release_pr_title` **rendered** (#86), which stays conventional
+/// and **non-releasable** (#41, #36) — the placeholders sit in the description,
+/// never in the type — so cicada's own release commit cannot trigger a release on
+/// the next run. The body lists what moved, in config order (#31), because `git show`
 /// on this commit is the whole point of `--no-push` (H6).
-fn commit_message(cfg: &cicada_core::Config, plan: &cicada_core::plan::Plan) -> String {
-    let mut m = cfg.settings.release_pr_title.clone();
+fn commit_message(
+    cfg: &cicada_core::Config,
+    branch: &str,
+    plan: &cicada_core::plan::Plan,
+) -> String {
+    let mut m = cicada_core::plan::render_pr_title(&cfg.settings.release_pr_title, branch, plan);
     m.push_str("\n\n");
     for r in &plan.releases {
         let from = r.from.as_ref().map(ToString::to_string).unwrap_or_else(|| "—".into());

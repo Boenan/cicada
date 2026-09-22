@@ -6,6 +6,10 @@
 release_branches = ["main", "test-no-pr"]
 default_scope    = "cicada"      # unscoped commits are cicada changes
 
+# Rendered (#86): `chore(main): release cicada 0.2.0`. The type stays `chore`, so
+# cicada's own release commit still cannot trigger a release (#41).
+release_pr_title = "chore({branch}): release {summary}"
+
 [forge]
 kind = "github"                  # required — never guessed at release time (#66)
 repo = "boenan/cicada"

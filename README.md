@@ -21,7 +21,7 @@ push to main  →  cicada opens a release PR  →  you merge it  →  cicada tag
 
 ## Installing
 
-**On GitHub Actions, you do not install it at all** — `uses: boenan/cicada@v1` downloads and verifies the
+**On GitHub Actions, you do not install it at all** — `uses: boenan/cicada@v0` downloads and verifies the
 binary for you. Same on GitLab: the shipped template runs the image. The rest of this section is for
 everywhere else.
 
@@ -29,11 +29,18 @@ everywhere else.
 
 ```bash
 base=https://github.com/boenan/cicada/releases/latest/download
-curl -sSfLO "$base/cicada-x86_64-unknown-linux-musl"     # or cicada-aarch64-unknown-linux-musl
+asset=cicada-x86_64-unknown-linux-musl.tar.gz    # or cicada-aarch64-unknown-linux-musl.tar.gz
+
+curl -sSfLO "$base/$asset"
 curl -sSfLO "$base/SHA256SUMS"
 sha256sum --check --ignore-missing SHA256SUMS
-install -m755 cicada-x86_64-unknown-linux-musl /usr/local/bin/cicada
+tar xzf "$asset"
+install -m755 cicada /usr/local/bin/cicada
 ```
+
+The archive holds a single `cicada`, already executable. That is why it is an archive: a GitHub
+release asset carries no permissions, so a bare binary downloads without its executable bit and has
+to be `chmod`-ed before it will run.
 
 `--ignore-missing` because `SHA256SUMS` lists every architecture and you downloaded one. It still fails if
 the file you did download is not in there, so it is a check rather than a formality.
@@ -41,7 +48,7 @@ the file you did download is not in there, so it is a check rather than a formal
 **The image.** It carries `git`, which cicada requires (#17) and will not start without:
 
 ```bash
-docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/repo" -w /repo ghcr.io/boenan/cicada:v1 cicada plan
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/repo" -w /repo ghcr.io/boenan/cicada:v0 cicada plan
 ```
 
 The `-u` is not optional in that line. Without it the container is root, your checkout is not, and git
@@ -50,7 +57,7 @@ refuses to operate on a repository it considers dubiously owned. The fix that su
 image's system config is not read at all.
 
 Tags are `v1.2.3` exactly, plus `v1.2`, `v1` and `latest` moving with each stable release. **A prerelease
-publishes only its exact tag**, so `:v1` never quietly resolves to an alpha.
+publishes only its exact tag**, so `:v0` never quietly resolves to an alpha.
 
 **Or `cargo install cicada`**, which works anywhere Rust does — including the platforms the binaries and
 images do not cover.
@@ -157,7 +164,7 @@ jobs:
         with:
           fetch-depth: 0             # full history, or the changelog is incomplete
           persist-credentials: false # or GITHUB_TOKEN hijacks cicada's push — see below
-      - uses: boenan/cicada@v1
+      - uses: boenan/cicada@v0
         with:
           token: ${{ secrets.CICADA_TOKEN }}   # see the footgun above
 ```
@@ -168,7 +175,7 @@ You also need **Settings → Actions → Allow GitHub Actions to create and appr
 
 ```yaml
 include:
-  - remote: https://raw.githubusercontent.com/boenan/cicada/v1/ci/gitlab-ci.yml
+  - remote: https://raw.githubusercontent.com/boenan/cicada/v0/ci/gitlab-ci.yml
 ```
 
 That ships `cicada:release` (ready to use) and `cicada:check` (lints a merge request's commits), plus a

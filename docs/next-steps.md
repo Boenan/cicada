@@ -563,6 +563,38 @@ say what went wrong rather than to be watched.
 
 ---
 
+## 0.2.0: what changed after the first release
+
+The first live release worked — the adapters, the tag, the release object, the trigger — and everything
+that broke afterwards was in the artifact workflow. Three fixes and one feature, all found by running the
+thing rather than reading it.
+
+| | |
+|---|---|
+| **The bootstrap** | `release.yml` ran `uses: ./`, which downloads a released binary — on the run that cuts the *first* release there is none, and no version to ask for either. It builds cicada from source and puts it on `$GITHUB_PATH`, which is the escape hatch the action documents. Kept permanently: this repo should release itself with the code at HEAD |
+| **`persist-credentials: false`** | `actions/checkout` writes GITHUB_TOKEN into `.git/config` as an `http.<url>.extraheader`, and git matches it against cicada's push URL — a config URL with no username matches any username, so the `x-access-token@` cicada puts there does not save it. The push **succeeded** as GITHUB_TOKEN, and events GITHUB_TOKEN creates start no workflow runs, so the tag triggered nothing |
+| **`GH_REPO`** | The asset-upload job has no checkout, so `gh` could not tell which repository it meant. It failed instantly and the retry loop — which discarded the error — reported a five-minute timeout and blamed cicada for a release that was sitting right there |
+| **`.tar.gz`** | A release asset carries no permissions and neither does `actions/upload-artifact`, so the published binary arrived non-executable twice over. `action.yml` hid it with a `chmod`; anyone following the README got "Permission denied". tar records the mode. Also 57% smaller |
+| **#86 / §16** | `release_pr_title` renders `{branch}` and `{summary}` |
+| **The `v1` references** | The README and the GitLab template pinned `@v1` and `:v1` from the day they were written, while the repo was on 0.x. Nothing published a `v1` of anything |
+
+**Three of the four bugs were in the same seam** — not in cicada, but in the CI around it, where a token or
+a permission is supplied by one step and consumed by another. None was visible from reading the file it
+lived in; each needed the sequence traced. That is the same finding the method note below records from the
+design walkthrough, arriving again in a different layer.
+
+**The `v1` fix needed a mechanism, not an edit.** `uses: org/repo@v0` resolves against a git ref, and cicada
+creates only exact-version tags (#2) — so nothing published a moving major tag. `artifacts.yml` now pushes
+`v0` and `v0.2` after the assets land, stable releases only, by the same rule the image tags follow. They are
+pure convention and carry no meaning for cicada: `v0` does not parse as a semver, so anchor resolution and
+Phase B ignore them, which was verified before the job was written rather than assumed.
+
+The workflow's tag filter is `v[0-9]+.[0-9]+.[0-9]+*` rather than `v*` for the same reason — otherwise the
+moving tags re-enter the workflow that just pushed them, `TAG` becomes `v0`, and the version check compares
+`0` against `0.2.0` on every release.
+
+---
+
 ## Constraints that are easy to violate
 
 These are cheap to honour from the start and expensive to retrofit:
@@ -603,6 +635,9 @@ These are cheap to honour from the start and expensive to retrofit:
 | #52 | Every edited file is re-parsed **before anything is written**. The check is inside the transform, so a bad splice cannot reach the working tree even on the path that writes without committing |
 | #98 | An unknown scope is fatal only on a commit that **can release**. Widening it back to every commit breaks every repo whose dependency bot writes `chore(deps):` — including this design's own worked example (B8/B9). Narrowing it further, so a releasable commit's bad scope is tolerated, is the silent misfiling #11 exists to prevent |
 | #95 | The date is an **input**, never a clock read inside `cicada-core`. It feeds changelog entry dates and nothing else, but an ambient read would make core impure and let `--dry-run` disagree with the run that follows it |
+| #86 | `release_pr_title`'s default carries **no placeholders**. Interpolation is opt-in, because changing the default would move every adopter's release commit subject on upgrade — and that subject must stay `chore` whatever else is rendered into it (#41), or cicada's own release commit justifies the next release |
+| #70 | The artifact workflow's tag filter is `v[0-9]+.[0-9]+.[0-9]+*`, never `v*`. It publishes the moving `v0` and `v0.2` tags itself, and `v*` lets those back in — `TAG` becomes `v0`, and the binary-versus-tag check compares `0` against `0.2.0` on every single release |
+| #2 | The moving major/minor **git** tags are convention for `uses: org/repo@v0` and carry no meaning for cicada. That is safe only because `v0` does not parse as a semver — verified, not assumed. A moving tag that *did* parse would become a candidate anchor |
 | #70 | The moving image tags (`v1.2`, `v1`, `latest`) move for **stable releases only**. A prerelease publishes its exact tag and nothing else — `ci/gitlab-ci.yml` pins `:v1`, and a pipeline pinned there to avoid surprises must not be handed an alpha |
 | #70 | Never rewrite the filename inside `SHA256SUMS` to match what you downloaded it as. `sha256sum` writes two spaces, and an off-by-one separator turns verification into a missing-file report — it *reads* like a failure but fails for the wrong reason. Download under the published name and use `--ignore-missing` |
 | #17 | `safe.directory` cannot be baked into the image. cicada runs git with `GIT_CONFIG_NOSYSTEM=1`, so the image's system config is never read — a bind-mounted checkout needs `-u` on the `docker run` instead |
@@ -666,7 +701,7 @@ rather than needing a new rule. Recorded in full in `docs/scenarios/single-servi
 | Was open | Now |
 |---|---|
 | `check`'s title mode | `check` lints a range only (#87); title linting → future-work §15 |
-| `{summary}` rendering | The title is a plain string (#86); rendering → future-work §16 |
+| `{summary}` rendering | Deferred as future-work §16, then **shipped in 0.2.0**: config order, truncated after three, no umbrella case (#86) |
 | A derived chart bump on a never-released chart | `initial_version` required on `helm` packages (#88) — unreachable |
 | A promoted prerelease line cutting rcs below its stable | Accepted (#91); merging back is the operator's job |
 | `from` on a first release in `--json` | `"from": null`, present (#89) |
@@ -686,7 +721,8 @@ back, and the temptation to add them recurs every time the guard they removed fi
 - **Release-branch and milestone-line arrangements** (#81 → future-work §14). v1 supports trunk releases
   only. `release_branches` excluding `main` still works as a *gate* (G7); what does not exist is a way to
   state a new line's opening minor.
-- **`check --title`** (#87 → §15) and **`{summary}`** (#86 → §16).
+- **`check --title`** (#87 → §15). **`{summary}`** (#86 → §16) came back: §16's recorded trigger was "the
+  first time someone asks which release a PR is proposing", and it fired.
 
 ---
 

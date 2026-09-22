@@ -91,7 +91,7 @@ runs:
           *) echo "::error::unsupported architecture $(uname -m); cicada ships x86_64 and aarch64 Linux binaries" >&2; exit 1 ;;
         esac
 
-        asset="cicada-${arch}-unknown-linux-musl"
+        asset="cicada-${arch}-unknown-linux-musl.tar.gz"
         base="https://github.com/${GITHUB_ACTION_REPOSITORY:-boenan/cicada}/releases/download/${version}"
 
         tmp="$(mktemp -d)"
@@ -112,9 +112,13 @@ runs:
           echo "::warning::no SHA256SUMS published for ${version}; the binary was not verified"
         fi
 
-        chmod +x "${tmp}/${asset}"
+        # The archive carries the executable bit; nothing else on this path
+        # does. A release asset has no permissions of its own, so the bare
+        # binary used to arrive non-executable and needed a chmod here — which
+        # worked for this action and for nobody installing by hand.
+        tar xzf "${tmp}/${asset}" -C "${tmp}"
         mkdir -p "${RUNNER_TEMP}/cicada-bin"
-        mv "${tmp}/${asset}" "${RUNNER_TEMP}/cicada-bin/cicada"
+        mv "${tmp}/cicada" "${RUNNER_TEMP}/cicada-bin/cicada"
         echo "${RUNNER_TEMP}/cicada-bin" >> "$GITHUB_PATH"
 
     - name: Run cicada
