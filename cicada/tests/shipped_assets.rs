@@ -461,3 +461,25 @@ fn the_readme_tells_people_to_download_assets_that_exist() {
         &md[at..line_end]
     );
 }
+
+#[test]
+fn the_checkout_does_not_hand_cicada_someone_elses_credentials() {
+    // `actions/checkout` defaults to persisting GITHUB_TOKEN into .git/config as
+    // an `http.<url>.extraheader`, and git matches that config against cicada's
+    // push URL — the username cicada puts in the URL does not prevent it, since a
+    // config URL carrying no username matches any username. The push then
+    // authenticates as GITHUB_TOKEN rather than as the configured PAT.
+    //
+    // It still succeeds. That is what makes it worth a test: the tag lands, and
+    // then no workflow reacts to it, because events created by GITHUB_TOKEN do
+    // not start workflow runs. The release ends up with no binaries on it and
+    // nothing anywhere says why.
+    for asset in [".github/workflows/release.yml", "README.md"] {
+        let src = read(asset);
+        assert!(
+            src.contains("persist-credentials: false"),
+            "{asset} checks out without `persist-credentials: false`, so GITHUB_TOKEN \
+             would be used for cicada's push and the tag would trigger nothing"
+        );
+    }
+}

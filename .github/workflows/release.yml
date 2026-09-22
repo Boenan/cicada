@@ -29,6 +29,23 @@ jobs:
           # see that error.
           fetch-depth: 0
 
+          # Or GITHUB_TOKEN hijacks cicada's push. actions/checkout otherwise
+          # writes `http.https://github.com/.extraheader` into .git/config with
+          # GITHUB_TOKEN in it, and git matches that config against cicada's push
+          # URL — the username cicada puts in the URL does not stop it, because a
+          # config URL without a username matches any username. The push then
+          # authenticates as GITHUB_TOKEN rather than as the PAT.
+          #
+          # It still succeeds, which is what makes this nasty: the tag lands, and
+          # then nothing happens. Events created by GITHUB_TOKEN do not start
+          # workflow runs, so `artifacts.yml` never fires and the release sits
+          # there with no binaries on it — the exact failure CICADA_TOKEN was
+          # configured to avoid, reintroduced by the checkout step.
+          #
+          # cicada needs nothing from these credentials: it derives its own push
+          # URL in memory and answers git through GIT_ASKPASS (#18).
+          persist-credentials: false
+
       # THE BOOTSTRAP. `uses: ./` runs the composite action, and that action
       # installs cicada by downloading a released binary — which, on the run that
       # cuts the *first* release, does not exist. There is no version to download

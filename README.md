@@ -123,6 +123,13 @@ will never run, so **the loop never turns at all**.
 
 Use a **PAT or GitHub App token** (GitHub) or a **Project Access Token** (GitLab). This is not a convenience.
 
+**And on GitHub, set `persist-credentials: false` on `actions/checkout`.** Without it the checkout writes
+`GITHUB_TOKEN` into `.git/config` as an `http.<url>.extraheader`, git matches that against cicada's push URL,
+and the push authenticates as `GITHUB_TOKEN` however correct your PAT is. The push *succeeds*, so nothing
+looks wrong — but the tag it pushed was created by `GITHUB_TOKEN`, so no workflow reacts to it, and any
+release-artifact job you have never runs. cicada wants none of those credentials: it derives its own push URL
+and answers git through `GIT_ASKPASS`.
+
 ---
 
 ## CI
@@ -149,6 +156,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0             # full history, or the changelog is incomplete
+          persist-credentials: false # or GITHUB_TOKEN hijacks cicada's push — see below
       - uses: boenan/cicada@v1
         with:
           token: ${{ secrets.CICADA_TOKEN }}   # see the footgun above
