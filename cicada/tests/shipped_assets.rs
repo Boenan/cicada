@@ -734,3 +734,42 @@ fn the_msrv_is_built_rather_than_asserted() {
          toolchain — the promise is unverified again"
     );
 }
+
+#[test]
+fn every_job_that_builds_states_which_rust_it_builds_with() {
+    // A job with no toolchain step runs whatever Rust the runner image happens
+    // to ship. That lags stable by weeks, and it changes underneath the repo
+    // with no commit to point at — so "which compiler produced this binary?" has
+    // no answer, and a toolchain regression looks like a code regression.
+    //
+    // `rust-version` is the floor and is checked elsewhere; this is the ceiling,
+    // and every build wants to be on current stable.
+    for asset in [
+        ".github/workflows/ci.yml",
+        ".github/workflows/artifacts.yml",
+        ".github/workflows/release.yml",
+    ] {
+        let src = read(asset);
+        let builds = src
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.contains("cargo build") || l.contains("cargo test"))
+            .count();
+        if builds == 0 {
+            continue;
+        }
+        assert!(
+            src.contains("dtolnay/rust-toolchain@"),
+            "{asset} builds with cargo but pins no toolchain, so it uses whatever \
+             the runner image ships"
+        );
+    }
+
+    // And the musl target comes from the same pin rather than a separate rustup
+    // call that could name a different toolchain's target set.
+    let artifacts = read(".github/workflows/artifacts.yml");
+    assert!(
+        !artifacts.contains("rustup target add"),
+        "the cross target should come from the toolchain action's `targets:`"
+    );
+}

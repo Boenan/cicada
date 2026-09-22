@@ -62,6 +62,8 @@ jobs:
       # ship — not with whatever binary shipped last time. An adopter copying
       # this workflow deletes this step; the README's worked example does not
       # have it.
+      - uses: dtolnay/rust-toolchain@stable
+
       - name: Build cicada from source (self-release bootstrap)
         run: |
           set -euo pipefail

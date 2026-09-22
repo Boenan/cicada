@@ -83,13 +83,19 @@ jobs:
           # binary that does not match the release it is attached to.
           ref: ${{ inputs.tag || github.ref }}
 
+      # The toolchain the published binary is built with, stated rather than
+      # inherited from the runner image. `targets:` replaces a `rustup target
+      # add`, and pins both halves in one place.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
       - name: Install the musl toolchain
         run: |
           set -euo pipefail
           sudo apt-get update -qq
           # `ring` builds C, and that C has to be compiled against musl.
           sudo apt-get install -y -qq musl-tools
-          rustup target add "${{ matrix.target }}"
 
       - name: Build
         # `--locked` so the published binary is built from the committed
