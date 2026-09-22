@@ -2,6 +2,14 @@
 
 <!-- cicada:insert -->
 
+## 0.2.2 (2026-09-22)
+
+### Bug Fixes
+
+* packaging wrote the binary into the cicada source directory (#18) ([ef4bdf7](https://github.com/boenan/cicada/commit/ef4bdf7c1a313910f8718a8bc8dfb5b928b7a2ff))
+
+[Compare with 0.2.1](https://github.com/boenan/cicada/compare/v0.2.1...v0.2.2)
+
 ## 0.2.1 (2026-09-22)
 
 ### Bug Fixes
