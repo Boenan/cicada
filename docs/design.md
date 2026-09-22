@@ -1627,7 +1627,9 @@ the dependency tree and binary small and the code straight-line.
 - **CI templates:** a GitHub composite action and a GitLab CI `include:` — **static YAML assets**, not
   rendered templates. Both call `cicada run`, bake in `fetch-depth: 0` / `GIT_DEPTH: 0`, and set concurrency
   guards (`concurrency:` / `resource_group`).
-- **Registry:** `ghcr.io/<org>/cicada` as primary, tagged `v1.2.3`, `v1.2`, `v1`, `latest`.
+- **Registry:** `ghcr.io/<org>/cicada` as primary, tagged `v1.2.3`, `v1.2`, `v1`, `latest`. The moving tags
+  move for **stable releases only** — a prerelease publishes its exact tag and nothing else, or a pipeline
+  pinned to `:v1` to avoid surprises gets handed an alpha and then silently gets taken off it again.
 - **Checksums:** a `SHA256SUMS` file alongside the binaries.
 - **Self-release:** cicada releases itself with cicada as soon as Phase A/B work end-to-end. Fastest way
   to find the rough edges, and it makes the repo its own reference implementation. `cicada --version` reports
@@ -1661,7 +1663,7 @@ Two sequencing principles, both learned from the decisions above:
 | **M5** | Phase B: tag reconciliation (reachability + collision), **independent release-object reconciliation**, stale-merge detection, release manifest (disk + embedded), `cicada run` ordering. **done**, and **prereleases with it** (#59–#64, #85, #93) | ✅ merge → tag → release; re-run is a no-op; a tag with no release object self-heals; a maintenance branch releases independently of `main`. 275 tests green. Verified end to end locally with `--no-push`; the forge half still rests on the fake (see M4) |
 | **M6** | GitLab adapter (REST v4, draft-as-title-prefix, self-hosted `api_url`). **built, unverified against a live instance** | Nine methods against REST v4; project addressed by URL-encoded full path so subgroups need nothing special; `Draft:` prefix with strip-before-prefix (#105); prerelease marked in the release name (#54). Retry policy shared with GitHub rather than reimplemented. 302 tests green. **Live HTTP unverified**, exactly as for GitHub |
 | **M7** | Shipped CI templates (Actions composite action, GitLab `include:`), docs incl. the CI-trigger footgun and a worked `cicada.toml` per repo shape. **done** | ✅ `README.md`, `action.yml`, `ci/gitlab-ci.yml`, and this repo's own workflows. Every config the README shows is parsed by the real parser in CI, and every shipped YAML asset by cicada's own reader — the adoption claim is mechanical, not asserted once. 314 tests green. The action's download step needs M8's published binaries |
-| **M8** | musl static binaries (x86_64, aarch64), multi-arch Docker with `git`, self-release | cicada v0.1.0 released by cicada |
+| **M8** | musl static binaries (x86_64, aarch64), multi-arch Docker with `git`, self-release. **Artifact half built** — `.github/workflows/artifacts.yml`, `ci/Dockerfile` | cicada v0.1.0 released by cicada. Binaries, `SHA256SUMS` and the image are built and locally verified; the asset names, checksum format and image tags are held to `action.yml` and `ci/gitlab-ci.yml` by tests that execute the shell rather than restate it. **Remaining: the self-release itself**, which runs the GitHub adapter live and is therefore the same gate M4 left open |
 
 **M0's unproven assumption has been discharged.** Decision #49 — span-preserving parse and byte splice — is
 what every updater rests on. `spikes/yaml-splice` confirms it works, names the crate, and captures the two

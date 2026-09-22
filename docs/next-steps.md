@@ -7,15 +7,21 @@ A running handoff, updated at the end of each milestone. Read `docs/design.md` f
 
 ## Start here
 
-**M0–M7 are complete. 314 tests green, clippy clean.** cicada releases end to end: plan, release PR, tag,
-release object, manifest — on GitHub and GitLab, with prereleases, maintenance lines and monorepos.
+**M0–M7 are complete, and M8's artifact half is built. 320 tests green, clippy clean.** cicada releases end
+to end: plan, release PR, tag, release object, manifest — on GitHub and GitLab, with prereleases, maintenance
+lines and monorepos. The binaries, checksums and image it publishes are built and locally verified.
 
-Two things are outstanding, and they are independent:
+Two things are outstanding, and **they are not as independent as this file used to claim**:
 
 1. **Neither forge adapter has spoken to a live server.** Everything testable without a network is tested;
-   the HTTP itself is unproven. This is the one gate that needs a human with a token — see
-   *Next: verify the adapters* below. It blocks nothing else.
-2. **M8** — musl binaries, multi-arch Docker, and cicada releasing itself. Fully specified, nothing blocking.
+   the HTTP itself is unproven. This is the one gate that needs a human with a token.
+2. **M8's exit criterion — "cicada v0.1.0 released by cicada" — runs the GitHub adapter against github.com**,
+   so it *is* the adapter gate rather than a separate errand. The artifact half (binaries, image) has no such
+   dependency and is done; what remains is the live run.
+
+**And `main` is one empty commit.** All the work is on `test`. `.github/workflows/release.yml` triggers on
+`push: branches: [main]`, so cicada's self-release has never fired and cannot until the branches meet. That
+is a decision, not a task — but it is the first move, and nothing in M8 finishes without it.
 
 Everything the design describes is implemented. Nothing in it is refused by the code.
 
@@ -38,8 +44,8 @@ Everything the design describes is implemented. Nothing in it is refused by the 
 | **Prereleases** | **Done.** The gap M1 left is closed: branch-level identifiers, the two-axis counter rule, #85 monotonicity, the skipped changelog, `--prerelease` |
 | **M6** | **Built; live HTTP unverified**, exactly as for GitHub. GitLab REST v4, subgroups, draft-as-title-prefix, prerelease-in-the-name |
 | **M7** | **Done.** `README.md`, the composite action, the GitLab `include:`, and this repo's own workflows — with the adoption claim enforced by tests rather than asserted |
-| **M8** | **Not started.** musl binaries + `SHA256SUMS`, multi-arch Docker with `git`, cicada releasing itself |
-| **Production code** | `cicada-core/` (pure) and `cicada/` (lib + bin). **314 tests green, clippy clean.** Next milestone is M8 |
+| **M8** | **Artifact half done.** `.github/workflows/artifacts.yml` + `ci/Dockerfile`: musl binaries for both arches, `SHA256SUMS`, multi-arch image, README install section. **Not done: cicada releasing itself**, which needs the live adapter run and a non-empty `main` |
+| **Production code** | `cicada-core/` (pure) and `cicada/` (lib + bin). **320 tests green, clippy clean.** |
 
 **The scenario pass rewrote parts of the design.** Decisions #73–#85 all came out of writing expected
 outcomes down, and four earlier decisions were reversed outright — see *Do not re-litigate* below, and note
@@ -489,6 +495,74 @@ Two things worth knowing about the shipped assets:
 
 ---
 
+## M8: the artifact half is built
+
+`.github/workflows/artifacts.yml` and `ci/Dockerfile`. This is the other side of #70 — cicada pushes a tag,
+and a **separate workflow** reacts to it. Nothing here is reachable from cicada's own code, and that is the
+point: an artifact build can fail and be retried without touching version state.
+
+| Piece | Location |
+|---|---|
+| musl binaries, both arches, built natively | `.github/workflows/artifacts.yml` job `build` |
+| `SHA256SUMS`, and the upload to the release cicada made | job `release-assets` |
+| Multi-arch image, moving tags | job `image`, `ci/Dockerfile` |
+| The three-way contract, made mechanical | `cicada/tests/shipped_assets.rs` |
+| Install instructions | `README.md` §Installing |
+
+Verified locally rather than asserted: the musl build was run in a container reproducing the workflow's
+steps (`ring` compiles against musl, the result is `static-pie`, 10.7MB → 8.3MB stripped), the image was
+built from that binary and `cicada --version` and `git --version` were run inside it, and the tag-computation
+and checksum shell was executed by tests that **extract it from the YAML** rather than restate it. What is
+*not* verified is aarch64 end to end and the push to ghcr.io — both need CI.
+
+**Four things the build settled:**
+
+1. **`action.yml`'s checksum verification never worked.** It rewrote the filename inside `SHA256SUMS` with
+   `sed "s/ ${asset}$/  cicada/"` — one space, where `sha256sum` writes two. The substitution therefore left
+   three, and the check went looking for a file named `␣cicada`, reported it missing, and failed *every*
+   install. Nobody would have read this and seen it; running it takes ten seconds. It now downloads under the
+   published name and runs `sha256sum --check --ignore-missing`, so there is no filename to rewrite — the bug
+   class is gone rather than fixed.
+2. **A prerelease must not move `:v1` or `:latest`.** `ci/gitlab-ci.yml` pins `ghcr.io/boenan/cicada:v1`, so
+   `v1` has to keep meaning *the current v1 release*. Cutting `v1.5.0-alpha.1` and letting it move the
+   floating tags would silently put every pipeline pinned to `v1` — pinned there precisely to avoid
+   surprises — onto an alpha, and the next stable would silently put them back. A prerelease publishes its
+   exact tag and nothing else.
+3. **The documented `docker run` needs `-u`, and the obvious fix for that is inert.** Root in the container,
+   a checkout owned by someone else, and git refuses the repository as dubiously owned. Baking
+   `git config --system --add safe.directory` into the image does not help, because cicada runs git with
+   `GIT_CONFIG_NOSYSTEM=1` (§Tech choices) and never reads the system config. So the `-u` is load-bearing in
+   the README, and a test asserts it is still on that line.
+4. **The trigger footgun has a third form.** Workflows do not run on events created by the default
+   `GITHUB_TOKEN` — the README says this about pull requests, and it is just as true of **tag pushes**. Run
+   cicada with `secrets.GITHUB_TOKEN` and it will tag, release, and never trigger this workflow: the release
+   sits there looking healthy with no binaries on it. `workflow_dispatch` takes a tag, so the repair does not
+   require re-cutting a release.
+
+**Two sequencing traps, both handled:**
+
+- **The release object may not exist yet.** Phase B pushes the tag and *then* creates the release, so this
+  workflow can start before the thing it uploads to exists. It waits, but with a bound: if creation failed,
+  cicada leaves the tag and self-heals on its **next run** (#56), which could be days. Waiting forever would
+  hide that, so it gives up after five minutes and says which of the two happened.
+- **The binary must agree with the tag.** `cicada --version` reports `CARGO_PKG_VERSION`, so comparing it to
+  the tag catches the workflow building a commit that is not the release commit — silent every other way, and
+  routine on `workflow_dispatch`, where the branch tip and the tag are usually different.
+
+**One assumption worth knowing about:** aarch64 is built on `ubuntu-24.04-arm` rather than cross-compiled,
+because `ring` compiles C and a cross build would need an aarch64-targeting musl toolchain. If those runners
+are ever unavailable to this repo, the fallback is `cross`, not a hand-assembled toolchain. The failure would
+be loud — a job that cannot be scheduled — not silent.
+
+### What is left in M8
+
+**cicada releasing itself.** That needs the live adapter run and a `main` that is not one empty commit. The
+artifact workflow will not fire until cicada pushes a real tag, so it is untested in anger by construction —
+which is the ordinary state of a workflow that reacts to a release, and why its failure modes are wired to
+say what went wrong rather than to be watched.
+
+---
+
 ## Constraints that are easy to violate
 
 These are cheap to honour from the start and expensive to retrofit:
@@ -529,6 +603,10 @@ These are cheap to honour from the start and expensive to retrofit:
 | #52 | Every edited file is re-parsed **before anything is written**. The check is inside the transform, so a bad splice cannot reach the working tree even on the path that writes without committing |
 | #98 | An unknown scope is fatal only on a commit that **can release**. Widening it back to every commit breaks every repo whose dependency bot writes `chore(deps):` — including this design's own worked example (B8/B9). Narrowing it further, so a releasable commit's bad scope is tolerated, is the silent misfiling #11 exists to prevent |
 | #95 | The date is an **input**, never a clock read inside `cicada-core`. It feeds changelog entry dates and nothing else, but an ambient read would make core impure and let `--dry-run` disagree with the run that follows it |
+| #70 | The moving image tags (`v1.2`, `v1`, `latest`) move for **stable releases only**. A prerelease publishes its exact tag and nothing else — `ci/gitlab-ci.yml` pins `:v1`, and a pipeline pinned there to avoid surprises must not be handed an alpha |
+| #70 | Never rewrite the filename inside `SHA256SUMS` to match what you downloaded it as. `sha256sum` writes two spaces, and an off-by-one separator turns verification into a missing-file report — it *reads* like a failure but fails for the wrong reason. Download under the published name and use `--ignore-missing` |
+| #17 | `safe.directory` cannot be baked into the image. cicada runs git with `GIT_CONFIG_NOSYSTEM=1`, so the image's system config is never read — a bind-mounted checkout needs `-u` on the `docker run` instead |
+| #7 | The CI-trigger footgun applies to **tag pushes**, not just pull requests. cicada running with the default `GITHUB_TOKEN` tags and releases without ever triggering the artifact workflow, leaving a release that looks healthy and carries no binaries |
 
 ---
 
@@ -612,10 +690,12 @@ back, and the temptation to add them recurs every time the guard they removed fi
 
 ---
 
-## Next: verify the adapters, then M8
+## Next: verify the adapters, and M8 finishes with them
 
 **Both adapters are written and neither has spoken to a live server.** That is the single outstanding gate,
-and it covers M4 and M6 together:
+it covers M4 and M6 together, and — since M8's exit criterion is cicada releasing itself through the GitHub
+adapter — it is now the only thing between here and the end of v1. `main` has to stop being one empty commit
+first; the release workflow triggers on it.
 
 ```
 CICADA_TOKEN=… cicada run        # on a release branch, with something to release
@@ -634,16 +714,17 @@ Likely failure sites, in order of how often adapters get them wrong:
 - **Both** — `create_release` needs the tag on the **remote**, so a `--no-push` Phase B followed by a pushed
   one fails there rather than locally.
 
-**Then M8**, which closes the loop the action already assumes:
+**M8's artifact half is built** — see *M8: the artifact half is built* above. The binaries, `SHA256SUMS`
+and the multi-arch image are all produced by `.github/workflows/artifacts.yml`, and the three-way contract
+between it, `action.yml` and `ci/gitlab-ci.yml` is enforced by tests that execute the shell rather than read
+it. What is left is **cicada releasing itself** (#21), which is the live run above and nothing more:
+`cicada.toml` is already the configuration and the worked example, `.github/workflows/release.yml` already
+runs it, and the artifact workflow is already waiting for the tag.
 
-- musl static binaries for `x86_64` and `aarch64`, attached to releases with a `SHA256SUMS` beside them —
-  `action.yml` already downloads and verifies exactly that.
-- multi-arch Docker for `linux/amd64` and `linux/arm64`, **with `git` in the image** (#17), so `scratch` is
-  out and Alpine or Debian-slim is in. `ci/gitlab-ci.yml` already references `ghcr.io/boenan/cicada:v1`.
-- **cicada releasing itself** (#21). `cicada.toml` at the root is already the configuration and the worked
-  example; `.github/workflows/release.yml` already runs it. What is missing is the *artifact* workflow, which
-  is a separate thing triggered by the tag cicada pushes (#70) — cicada never grows a cross-compilation
-  matrix of its own.
+The first real self-release is also the first time the artifact workflow runs. Expect to look at, in this
+order: whether the tag push triggered it at all (the token question above), whether `ubuntu-24.04-arm` is
+schedulable for this repo, and whether ghcr.io accepted the push — `packages: write` is declared, but the
+package has to be linked to the repository the first time.
 
 ---
 

@@ -19,6 +19,44 @@ push to main  →  cicada opens a release PR  →  you merge it  →  cicada tag
 
 ---
 
+## Installing
+
+**On GitHub Actions, you do not install it at all** — `uses: boenan/cicada@v1` downloads and verifies the
+binary for you. Same on GitLab: the shipped template runs the image. The rest of this section is for
+everywhere else.
+
+**A released binary.** Static musl builds, attached to every release with a `SHA256SUMS` beside them:
+
+```bash
+base=https://github.com/boenan/cicada/releases/latest/download
+curl -sSfLO "$base/cicada-x86_64-unknown-linux-musl"     # or cicada-aarch64-unknown-linux-musl
+curl -sSfLO "$base/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS
+install -m755 cicada-x86_64-unknown-linux-musl /usr/local/bin/cicada
+```
+
+`--ignore-missing` because `SHA256SUMS` lists every architecture and you downloaded one. It still fails if
+the file you did download is not in there, so it is a check rather than a formality.
+
+**The image.** It carries `git`, which cicada requires (#17) and will not start without:
+
+```bash
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/repo" -w /repo ghcr.io/boenan/cicada:v1 cicada plan
+```
+
+The `-u` is not optional in that line. Without it the container is root, your checkout is not, and git
+refuses to operate on a repository it considers dubiously owned. The fix that suggests itself — baking
+`safe.directory` into the image — does **not** work: cicada runs git with `GIT_CONFIG_NOSYSTEM=1`, so the
+image's system config is not read at all.
+
+Tags are `v1.2.3` exactly, plus `v1.2`, `v1` and `latest` moving with each stable release. **A prerelease
+publishes only its exact tag**, so `:v1` never quietly resolves to an alpha.
+
+**Or `cargo install cicada`**, which works anywhere Rust does — including the platforms the binaries and
+images do not cover.
+
+---
+
 ## Quick start
 
 **1. Write `cicada.toml` at the repo root.** There is no `cicada init` — the package list is yours to own,

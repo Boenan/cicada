@@ -95,17 +95,26 @@ runs:
         base="https://github.com/${GITHUB_ACTION_REPOSITORY:-boenan/cicada}/releases/download/${version}"
 
         tmp="$(mktemp -d)"
-        curl -sSfL "${base}/${asset}" -o "${tmp}/cicada"
+        # Downloaded under its published name, and renamed only after the check.
+        # Rewriting the filename inside SHA256SUMS instead means reproducing
+        # `sha256sum`'s exact two-space separator, and getting that off by one
+        # makes the check look for a file that does not exist — which reads as a
+        # missing file rather than as a failed verification.
+        curl -sSfL "${base}/${asset}" -o "${tmp}/${asset}"
         # Checksums ship alongside the binaries, so verify rather than trust.
         if curl -sSfL "${base}/SHA256SUMS" -o "${tmp}/SHA256SUMS"; then
-          ( cd "$tmp" && grep " ${asset}\$" SHA256SUMS | sed "s/ ${asset}\$/  cicada/" | sha256sum -c - )
+          # `--ignore-missing` because SHA256SUMS lists every architecture and
+          # only one of them was downloaded. It is not a way of passing quietly:
+          # with nothing left to verify `sha256sum` still exits non-zero, so a
+          # SHA256SUMS that does not mention this asset fails here.
+          ( cd "$tmp" && sha256sum --check --ignore-missing SHA256SUMS )
         else
           echo "::warning::no SHA256SUMS published for ${version}; the binary was not verified"
         fi
 
-        chmod +x "${tmp}/cicada"
+        chmod +x "${tmp}/${asset}"
         mkdir -p "${RUNNER_TEMP}/cicada-bin"
-        mv "${tmp}/cicada" "${RUNNER_TEMP}/cicada-bin/cicada"
+        mv "${tmp}/${asset}" "${RUNNER_TEMP}/cicada-bin/cicada"
         echo "${RUNNER_TEMP}/cicada-bin" >> "$GITHUB_PATH"
 
     - name: Run cicada
