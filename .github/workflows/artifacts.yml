@@ -146,6 +146,12 @@ jobs:
       - name: Wait for the release object
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # `gh` reads which repository it is talking about from the git remote,
+          # and this job has no checkout — there is no remote to read. Without
+          # this every call fails with "failed to determine base repo" however
+          # healthy the release is, and the retry loop below turns that into a
+          # five-minute wait for something that already exists.
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           # Phase B pushes the tag and *then* creates the release object, so this
@@ -155,20 +161,28 @@ jobs:
           # It can also never close: if release creation failed, cicada leaves the
           # tag and self-heals on its next run (#56). Waiting forever would hide
           # that, so this gives up and says which of the two happened.
+          # The error is kept rather than discarded. A retry loop that throws it
+          # away can only ever report "timed out", which is the one thing that
+          # was never the cause — the first run of this job waited five minutes
+          # on a release that was sitting right there, and said release creation
+          # must have failed.
+          err="(no attempt made)"
           for i in $(seq 1 60); do
-            if gh release view "$TAG" >/dev/null 2>&1; then
+            if err="$(gh release view "$TAG" 2>&1 >/dev/null)"; then
               echo "release ${TAG} is there after ${i} attempt(s)"
               exit 0
             fi
             sleep 5
           done
           echo "::error::no release object for ${TAG} after 5 minutes." >&2
-          echo "::error::The tag exists, so cicada got that far. Either release creation failed — cicada will self-heal it on its next run (#56), and this workflow can then be re-run from workflow_dispatch — or the tag was not created by cicada." >&2
+          echo "::error::last error from gh: ${err}" >&2
+          echo "::error::If that says the release was not found, cicada created the tag but not the release object; it self-heals on its next run (#56), and this workflow can then be re-run from workflow_dispatch. Anything else is this job's own problem, not cicada's." >&2
           exit 1
 
       - name: Upload
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         # `--clobber` so a re-run repairs a partial upload instead of failing on
         # the assets that already landed.
         run: gh release upload "$TAG" dist/cicada-* dist/SHA256SUMS --clobber
