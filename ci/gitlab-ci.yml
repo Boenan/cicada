@@ -1,7 +1,7 @@
 # The shipped GitLab CI template (design §Distribution).
 #
 #   include:
-#     - remote: https://raw.githubusercontent.com/boenan/cicada/v1/ci/gitlab-ci.yml
+#     - remote: https://raw.githubusercontent.com/boenan/cicada/v0/ci/gitlab-ci.yml
 #
 # A **static asset**, not a rendered template. Two things are provided: a hidden
 # `.cicada` job to extend, and a concrete `cicada:release` job that works as-is.
@@ -20,7 +20,7 @@
 variables:
   # Override to pin a version. `latest` is convenient and reproducible only by
   # accident; pin this in anything you rely on.
-  CICADA_IMAGE: ghcr.io/boenan/cicada:v1
+  CICADA_IMAGE: ghcr.io/boenan/cicada:v0
 
 .cicada:
   image: $CICADA_IMAGE

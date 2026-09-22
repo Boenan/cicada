@@ -900,3 +900,75 @@ fn something_that_is_not_this_packages_tag_is_rejected() {
     assert_eq!(parse_tag("v{version}", "1.5.0"), None);
     assert_eq!(parse_tag("v{version}", "vx.y.z"), None);
 }
+
+// --- the release-PR title (#86, closing future-work §16) -----------------
+
+#[test]
+fn the_title_renders_the_release_it_is_proposing() {
+    // The deferral's own trigger: "a reviewer scanning a PR list cannot see which
+    // version is proposed without opening it".
+    let c = cfg(SHAPE_1);
+    let p = run(&c, &shape_1_at("1.4.2"), &commits(&["feat: a"])).unwrap();
+
+    assert_eq!(
+        cicada_core::plan::render_pr_title("chore({branch}): release {summary}", "main", &p),
+        "chore(main): release app 1.5.0"
+    );
+    // A maintenance line says so in the title, which is the other half of why
+    // `{branch}` is worth having.
+    assert_eq!(
+        cicada_core::plan::render_pr_title("chore({branch}): release {summary}", "release/1.4", &p),
+        "chore(release/1.4): release app 1.5.0"
+    );
+}
+
+#[test]
+fn the_default_title_is_unchanged_by_rendering() {
+    // Interpolation is opt-in. An existing config carries no placeholders, and
+    // must come out byte-identical or every adopter's release commit subject
+    // changes under them on upgrade.
+    let c = cfg(SHAPE_1);
+    let p = run(&c, &shape_1_at("1.4.2"), &commits(&["feat: a"])).unwrap();
+    let default = &c.settings.release_pr_title;
+
+    assert_eq!(default, "chore(release): prepare release");
+    assert_eq!(cicada_core::plan::render_pr_title(default, "main", &p), *default);
+}
+
+#[test]
+fn a_monorepo_title_names_three_and_counts_the_rest() {
+    let c = cfg(MONOREPO);
+    let p = run(
+        &c,
+        &versions(MONOREPO_VERSIONS),
+        &commits(&["feat(api): a", "fix(worker): b", "feat(auth): c"]),
+    )
+    .unwrap();
+
+    // Five releases: the three named packages, the chart that tracks `api`, and
+    // the umbrella. Config order decides which three are named (#31, O6) — not a
+    // sort, and not importance.
+    assert_eq!(p.releases.len(), 5);
+    assert_eq!(
+        cicada_core::plan::render_pr_title("chore: release {summary}", "main", &p),
+        "chore: release api 1.5.0, worker 0.9.2, auth 0.1.0 and 2 more"
+    );
+
+    // No umbrella special case, and this is what that costs: `platform` is last
+    // (#96), so it is counted rather than named. Deliberate — naming only the
+    // umbrella would read as though nothing else moved.
+    assert_eq!(p.releases.last().unwrap().name, "platform");
+}
+
+#[test]
+fn exactly_three_releases_are_all_named_with_no_count() {
+    // The boundary, and `and 0 more` is the bug it pins.
+    let c = cfg(MONOREPO);
+    let p = run(&c, &versions(MONOREPO_VERSIONS), &commits(&["feat(api): a"])).unwrap();
+
+    assert_eq!(p.releases.len(), 3);
+    assert_eq!(
+        cicada_core::plan::render_pr_title("{summary}", "main", &p),
+        "api 1.5.0, api-chart 0.9.1, platform 1.8.0"
+    );
+}

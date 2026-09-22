@@ -304,22 +304,21 @@ semantics is worse than an absent one, so it is absent.
 
 ---
 
-## 16. A rendered summary in the release-PR title
+## 16. A rendered summary in the release-PR title — **done**
 
-**Deferred because** the rendering was never defined (#86). `release_pr_title` is a plain string with no
-interpolation, defaulting to `chore(release): prepare release`, so every release PR carries the same title.
+Shipped. Kept here with its number so the references elsewhere still resolve.
 
-That is safe — the upsert has always keyed on the head branch and never the title (#77), and the PR body
-carries the full notes — but it is a real ergonomic loss: a reviewer scanning a PR list cannot see which
-version is proposed without opening it.
+`release_pr_title` renders `{branch}` and `{summary}`. The trigger recorded here was "the first time
+someone asks which release a PR is proposing", and that is exactly how it came up.
 
-**What it would take.** A defined rendering for `{summary}` in both shapes. For one package the answer is
-obvious (`v1.5.0`); for many it is not, and the candidates each have a cost: the umbrella's version when one
-is declared (right, but only when one is declared), a comma-joined list of `pkg version` pairs in config
-order (accurate, unbounded), or that list truncated after three with `and N more` (bounded, lossy). Forge PR
-titles get elided in list views anyway, which argues for the truncated form.
+`{summary}` names the releases in config order and truncates after three — `api 1.5.0, worker 0.9.2,
+auth 0.1.0 and 2 more`. The umbrella candidate was **rejected** rather than deferred: naming only the
+umbrella reads as though nothing else moved, and it is a rule that fires only in repos declaring one, so
+the shape most likely to produce a surprising title would be the one least often exercised. The umbrella
+is one entry among the rest, and being last (#96) it is usually counted rather than named.
 
-**Trigger:** the first time someone asks which release a PR is proposing.
+The default is unchanged and carries no placeholders, so this is opt-in and no adopter's release commit
+subject moves under them.
 
 ---
 

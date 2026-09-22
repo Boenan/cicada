@@ -28,7 +28,12 @@ on:
   push:
     # `tag_format = "v{version}"` in cicada.toml. Covers prereleases too —
     # `v1.5.0-alpha.1` is a tag a tester needs a binary for.
-    tags: ['v*']
+    #
+    # Three components, deliberately: this workflow also *publishes* the moving
+    # `v0` and `v0.2` tags below, and `v*` would let those re-enter it. TAG would
+    # then be `v0`, the version check would compare `0` against the binary's
+    # `0.2.0`, and every moving-tag push would leave a failed run behind.
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
 
   # Re-attaching artifacts to a tag that already exists. This is the retry that
   # #70's separation is *for*: the version state is already correct and must not
@@ -274,3 +279,41 @@ jobs:
           tags: ${{ steps.tags.outputs.tags }}
           build-args: |
             VERSION=${{ env.TAG }}
+
+  # ---------------------------------------------------------------------------
+  moving-tags:
+    name: move v<major> and v<major>.<minor>
+    # After the assets, never before: `uses: Boenan/cicada@v0` has to resolve to
+    # a release that is actually complete, and moving the tag first would point
+    # it at one whose binaries are still uploading.
+    needs: release-assets
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Move them
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+
+          # Same rule as the image tags: a prerelease moves nothing. `@v0`
+          # resolving to an alpha because an alpha was cut most recently is the
+          # failure this exists to prevent, not a special case of it.
+          case "$version" in
+            *-*) echo "prerelease ${TAG}: moving nothing"; exit 0 ;;
+          esac
+
+          major="${version%%.*}"
+          minor="${version#*.}"; minor="${minor%%.*}"
+
+          # GitHub Actions resolves `uses: org/repo@v0` against a git ref, and
+          # cicada only ever creates exact-version tags (#2) — so nothing else
+          # publishes these. They are pure convention and carry no meaning for
+          # cicada: `v0` does not parse as a semver, so anchor resolution and
+          # Phase B ignore them entirely.
+          git tag -f "v${major}" "$TAG"
+          git tag -f "v${major}.${minor}" "$TAG"
+          git push -f origin "v${major}" "v${major}.${minor}"
+          echo "v${major} and v${major}.${minor} now point at ${TAG}"

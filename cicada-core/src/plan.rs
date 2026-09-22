@@ -625,3 +625,44 @@ fn guard_maintenance(cfg: &Config, releases: &[Release], branch: &str) -> Result
     }
     Err(PlanError::MaintenanceGuard { branch: branch.to_string(), offenders })
 }
+
+/// How many releases `{summary}` names before it stops counting.
+///
+/// Three, because a forge elides a long PR title in a list view anyway — which
+/// is the one place the title has to earn its keep — and a title truncated by
+/// the forge loses the count as well as the names.
+const SUMMARY_NAMES: usize = 3;
+
+/// Render `release_pr_title` (#86, closing future-work §16).
+///
+/// Two placeholders, substituted the same way `release_pr_branch` handles
+/// `{branch}` — a plain replacement, not a template engine. A title is one line
+/// with at most two variables in it, and reaching for minijinja here would mean
+/// a second, differently-shaped templating surface for adopters to learn.
+///
+/// Neither placeholder is required: the default carries no interpolation at all,
+/// so an existing config keeps the title it already had.
+pub fn render_pr_title(template: &str, branch: &str, plan: &Plan) -> String {
+    template.replace("{branch}", branch).replace("{summary}", &summary(plan))
+}
+
+/// The releases a run proposes, in config order, truncated after three.
+///
+/// **No special case for an umbrella.** It was considered and rejected: naming
+/// only the umbrella reads as though nothing else moved, and it is a second rule
+/// that only repos declaring one would ever see fire — so the one repo shape
+/// most likely to get a surprising title is the one nobody tested.
+fn summary(plan: &Plan) -> String {
+    let named: Vec<String> =
+        plan.releases.iter().take(SUMMARY_NAMES).map(|r| format!("{} {}", r.name, r.to)).collect();
+    let rest = plan.releases.len().saturating_sub(SUMMARY_NAMES);
+
+    match (named.is_empty(), rest) {
+        // Unreachable through the CLI — a title is only rendered when there is a
+        // release to open a PR for — but a rendering function that panics or
+        // produces `" and 0 more"` on an empty plan is a trap for the next caller.
+        (true, _) => String::new(),
+        (false, 0) => named.join(", "),
+        (false, n) => format!("{} and {n} more", named.join(", ")),
+    }
+}

@@ -175,7 +175,7 @@ adapters cheap instead of a rewrite.
 | 83 | `release_branches` is **required** — cicada refuses to guess where it may write. The two branch *classifiers* default to a convention instead: `maintenance_branches = ["maintenance/**", "maintenance-*"]` and `prerelease_branches = ["prerelease/**", "prerelease-*"]` with `prerelease_identifier = "rc"`. Safe because they only ever classify branches `release_branches` already admitted. Every default is tabulated in §Configuration, so "what happens if I omit this" is never answered by reading the source |
 | 84 | **One identifier at a time.** `prerelease_identifier` is a single scalar, never a per-branch mapping — so two patterns matching one branch need no tie-break and the setting needs no ordered map. It is *at a time*, not forever: the value may move as the line matures (#93). What cicada never expresses is two stages in flight **simultaneously** — a `beta` line and an `rc` line running in parallel off one repo |
 | 85 | A computed prerelease must be **strictly greater** than the open one recorded in the versions file — #76's monotonicity rule applied to computed versions, not only forced ones. It is the **only** guarantee a maturity ladder gets (#93): it permits `alpha` → `beta` → `rc` and refuses `rc` → `beta`, without cicada knowing what any of those words mean |
-| 86 | `release_pr_title` is a **plain string with no interpolation**, defaulting to `chore(release): prepare release`. Every release PR therefore carries the same title, which is safe because the upsert has always keyed on the head branch and never the title (#77). Rendering the proposed version into it is future-work §16 |
+| 86 | `release_pr_title` renders two placeholders, `{branch}` and `{summary}` — a plain `replace`, the same mechanism `release_pr_branch` uses for `{branch}`, not a template engine. The default carries **no** placeholders (`chore(release): prepare release`), so interpolation is opt-in and an existing config keeps its title byte-identical. `{summary}` names the releases in config order, truncated after three with `and N more` — **no umbrella special case**, because naming only the umbrella reads as though nothing else moved. Upsert still keys on the head branch, never the title (#77), so a title that changes per release changes nothing structural |
 | 87 | `check` lints a **commit range and nothing else**. There is no `--title` flag and no title mode; linting a squash-merge PR title is future-work §15 |
 | 88 | A package with a `helm` updater must declare `initial_version`. Helm requires `version` in `Chart.yaml`, so a chart always has a number its author already knows — cicada neither invents one nor reads `Chart.yaml` back to find it (#75) |
 | 89 | `--json` emits `"from": null` on a first release — present and explicit. `"0.0.0"` is a version that never existed and produces broken compare URLs; omitting the key is ambiguous with an older schema (#69) |
@@ -658,7 +658,8 @@ commit_source     = "commits"                    # "commits" (--no-merges) | "me
 
 # the release PR cicada opens — its head branch and its title (#27, #41)
 release_pr_branch = "cicada/{branch}"    # the PR's HEAD; base is whichever branch cicada ran on
-release_pr_title  = "chore(release): prepare release"   # a plain string; no interpolation (#86)
+# `{branch}` and `{summary}` are optional; the default below uses neither (#86)
+release_pr_title  = "chore({branch}): release {summary}"   # chore(main): release app 1.5.0
 
 # which branches cut prereleases, and what those prereleases are called (#59, #84)
 prerelease_branches   = ["prerelease-v*-rc"]     # a glob list, like maintenance_branches
@@ -767,7 +768,7 @@ missing key has to be discovered by experiment is a release tool nobody trusts.
 | `committer` | `cicada[bot] <cicada@users.noreply.github.com>` | Has a default *and* must not drift between versions — #32's guard reads it back |
 | `commit_source` | `"commits"` | `--no-merges`; identical to the alternatives on squash/rebase repos (#40) |
 | `release_pr_branch` | `"cicada/{branch}"` | Outside any plausible `release_branches` glob (#27) |
-| `release_pr_title` | `"chore(release): prepare release"` | Conventional and non-releasable (#41); a plain string, no interpolation (#86) |
+| `release_pr_title` | `"chore(release): prepare release"` | Conventional and non-releasable (#41). Renders `{branch}` and `{summary}`; the default uses neither (#86) |
 | `forge.kind` | **error** | Never inferred from the remote at release time; the error names the value it would have detected (#66) |
 | `forge.api_url` | the public host for `kind` | |
 | `forge.repo` | derived from `origin` | The one forge value that *is* derived, because it cannot be ambiguous |
@@ -1696,7 +1697,7 @@ out rather than adding a rule:
 | Was open | Resolution |
 |---|---|
 | `check`'s title mode contradicted `commit_source`'s enum | `check` lints a range only; title linting deferred (#87, future-work §15) |
-| `{summary}` in `release_pr_title` had no defined rendering | The title is a plain string with no interpolation (#86, future-work §16) |
+| `{summary}` in `release_pr_title` had no defined rendering | Defined and shipped: config order, truncated after three, no umbrella case (#86) |
 | A derived chart bump on a never-released chart landed on `0.0.1` | `initial_version` is required on a `helm` package, so the case cannot arise (#88) |
 | `from` on a first release in `--json` | `"from": null`, present and explicit (#89) |
 | A promoted prerelease line keeps cutting rcs below the stable it shipped | Accepted: cicada acts on what the branch and the config say, and merging back is the operator's job (#91) |

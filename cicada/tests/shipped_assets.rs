@@ -592,3 +592,85 @@ fn the_executable_bit_survives_the_trip_to_a_users_disk() {
     let _ = std::fs::remove_dir_all(&src);
     let _ = std::fs::remove_dir_all(&dst);
 }
+
+/// The major version this repo currently builds, from the workspace manifest.
+fn current_major() -> u64 {
+    let toml = read("Cargo.toml");
+    let v = toml
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("version = "))
+        .expect("the workspace must declare a version")
+        .trim()
+        .trim_matches('"')
+        .to_string();
+    v.split('.').next().unwrap().parse().expect("a numeric major")
+}
+
+#[test]
+fn the_docs_never_point_at_a_major_that_does_not_exist() {
+    // The README said `uses: boenan/cicada@v1` and the GitLab template pinned
+    // `ghcr.io/boenan/cicada:v1` from the day they were written — while the repo
+    // was, and still is, on 0.x. Nothing publishes a `v1` of anything, so both
+    // instructions 404 for the adopter who follows them first.
+    //
+    // The rule is one-sided on purpose: **documented major must not be ahead of
+    // the released major**. Requiring equality would fail inside the release PR
+    // that first bumps to 1.0.0 — a generated PR that cannot be hand-edited
+    // without tripping the staleness guard (#32) — and would block the major
+    // release it was meant to keep honest.
+    let major = current_major();
+    let readme = read("README.md");
+    let gitlab = read("ci/gitlab-ci.yml");
+
+    let refs = |src: &str, pat: &str| -> Vec<u64> {
+        src.match_indices(pat)
+            .filter_map(|(i, _)| {
+                src[i + pat.len()..]
+                    .chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect::<String>()
+                    .parse()
+                    .ok()
+            })
+            .collect()
+    };
+
+    let mut seen = 0;
+    for (name, found) in [
+        ("README `uses:`", refs(&readme, "boenan/cicada@v")),
+        ("README image", refs(&readme, "ghcr.io/boenan/cicada:v")),
+        ("GitLab image", refs(&gitlab, "ghcr.io/boenan/cicada:v")),
+    ] {
+        for r in &found {
+            seen += 1;
+            assert!(
+                *r <= major,
+                "{name} points at v{r}, but this repo is on {major}.x — nothing \
+                 publishes a v{r}, so that instruction 404s"
+            );
+        }
+    }
+    assert!(seen >= 3, "only {seen} version-pinned references found; did they move?");
+}
+
+#[test]
+fn the_moving_major_tag_the_readme_relies_on_is_published() {
+    // `uses: boenan/cicada@v0` resolves against a git ref, and cicada creates
+    // only exact-version tags (#2) — so if this workflow stops pushing them, the
+    // README's install line quietly stops resolving.
+    let workflow = read(".github/workflows/artifacts.yml");
+    assert!(
+        workflow.contains(r#"git tag -f "v${major}""#),
+        "nothing publishes the moving major tag that `uses: …@v0` needs"
+    );
+    assert!(
+        workflow.contains("git push -f origin"),
+        "the moving tags are created but never pushed"
+    );
+    // And it must not be able to trigger itself: a `v*` filter would let the
+    // moving tags back in, with TAG=v0 failing the version check every time.
+    assert!(
+        !workflow.contains("tags: ['v*']"),
+        "the tag filter would let the moving tags re-enter this workflow"
+    );
+}
