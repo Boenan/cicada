@@ -29,11 +29,18 @@ everywhere else.
 
 ```bash
 base=https://github.com/boenan/cicada/releases/latest/download
-curl -sSfLO "$base/cicada-x86_64-unknown-linux-musl"     # or cicada-aarch64-unknown-linux-musl
+asset=cicada-x86_64-unknown-linux-musl.tar.gz    # or cicada-aarch64-unknown-linux-musl.tar.gz
+
+curl -sSfLO "$base/$asset"
 curl -sSfLO "$base/SHA256SUMS"
 sha256sum --check --ignore-missing SHA256SUMS
-install -m755 cicada-x86_64-unknown-linux-musl /usr/local/bin/cicada
+tar xzf "$asset"
+install -m755 cicada /usr/local/bin/cicada
 ```
+
+The archive holds a single `cicada`, already executable. That is why it is an archive: a GitHub
+release asset carries no permissions, so a bare binary downloads without its executable bit and has
+to be `chmod`-ed before it will run.
 
 `--ignore-missing` because `SHA256SUMS` lists every architecture and you downloaded one. It still fails if
 the file you did download is not in there, so it is a check rather than a formality.

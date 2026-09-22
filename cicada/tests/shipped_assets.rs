@@ -232,8 +232,12 @@ fn the_action_downloads_exactly_the_assets_the_workflow_publishes() {
              download cicada-{target}"
         );
         assert!(
-            action.contains(&format!("asset=\"cicada-${{arch}}-{suffix}\"")),
-            "action.yml does not build the asset name `cicada-{target}`"
+            action.contains(&format!("asset=\"cicada-${{arch}}-{suffix}.tar.gz\"")),
+            "action.yml does not build the asset name `cicada-{target}.tar.gz`"
+        );
+        assert!(
+            workflow.contains("cicada-${{ matrix.target }}.tar.gz"),
+            "the workflow does not publish a .tar.gz for {target}"
         );
     }
 }
@@ -261,8 +265,11 @@ fn the_checksum_file_the_workflow_writes_is_one_the_action_can_verify() {
 
     let dir = scratch("sha");
     for target in published_targets(&workflow) {
-        std::fs::write(dir.join(format!("cicada-{target}")), format!("pretend binary {target}"))
-            .unwrap();
+        std::fs::write(
+            dir.join(format!("cicada-{target}.tar.gz")),
+            format!("pretend archive {target}"),
+        )
+        .unwrap();
     }
 
     let sh = |script: &str, dir: &Path| {
@@ -285,8 +292,11 @@ fn the_checksum_file_the_workflow_writes_is_one_the_action_can_verify() {
     // check has to be run the way the action runs it.
     let one = scratch("sha-one");
     let target = &published_targets(&workflow)[0];
-    std::fs::copy(dir.join(format!("cicada-{target}")), one.join(format!("cicada-{target}")))
-        .unwrap();
+    std::fs::copy(
+        dir.join(format!("cicada-{target}.tar.gz")),
+        one.join(format!("cicada-{target}.tar.gz")),
+    )
+    .unwrap();
     std::fs::copy(dir.join("SHA256SUMS"), one.join("SHA256SUMS")).unwrap();
 
     let script = format!("tmp={} ; {verify}", one.display());
@@ -299,7 +309,7 @@ fn the_checksum_file_the_workflow_writes_is_one_the_action_can_verify() {
     );
 
     // And it must still be a real check: a tampered binary has to fail it.
-    std::fs::write(one.join(format!("cicada-{target}")), "tampered").unwrap();
+    std::fs::write(one.join(format!("cicada-{target}.tar.gz")), "tampered").unwrap();
     let out = sh(&script, &one);
     assert!(
         !out.status.success(),
@@ -432,8 +442,8 @@ fn the_readme_tells_people_to_download_assets_that_exist() {
 
     for target in published_targets(&workflow) {
         assert!(
-            md.contains(&format!("cicada-{target}")),
-            "the README's install section does not mention cicada-{target}"
+            md.contains(&format!("cicada-{target}.tar.gz")),
+            "the README's install section does not mention cicada-{target}.tar.gz"
         );
     }
     assert!(md.contains("SHA256SUMS"), "and it must tell people to verify it");
@@ -504,4 +514,81 @@ fn every_gh_step_knows_which_repository_it_is_talking_about() {
         "{tokens} step(s) set GH_TOKEN but only {repos} set GH_REPO — a gh step \
          without GH_REPO fails to find the repository, and fails slowly"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn the_executable_bit_survives_the_trip_to_a_users_disk() {
+    // The reason the assets are archives at all. A GitHub release asset carries
+    // no permissions, and actions/upload-artifact does not preserve them either —
+    // so a bare binary published that way arrives non-executable and has to be
+    // chmod-ed by whoever downloads it. That worked for the action, which chmods,
+    // and failed for every human following the README.
+    //
+    // tar records the mode, so this is a property of the pack/unpack commands in
+    // those two files, and both are executed here rather than described.
+    let workflow = read(".github/workflows/artifacts.yml");
+    let action = read("action.yml");
+    let target = &published_targets(&workflow)[0];
+
+    let pack = workflow
+        .lines()
+        .find(|l| l.contains("tar czf"))
+        .expect("the workflow must still build the archive")
+        .trim()
+        .replace("${{ matrix.target }}", target);
+    let unpack = action
+        .lines()
+        .find(|l| l.contains("tar xzf"))
+        .expect("the action must still extract the archive")
+        .trim()
+        .to_string();
+
+    // The mode is set once, where the binary is built — and that line is taken
+    // from the workflow too, so dropping it there fails here rather than only
+    // being noticed by a reader.
+    let stage = workflow
+        .lines()
+        .find(|l| l.trim_start().starts_with("install -"))
+        .expect("the workflow must still set the executable bit before packing")
+        .trim()
+        .to_string();
+
+    let src = scratch("tar-src");
+    std::fs::write(src.join("built"), "#!/bin/sh\necho hi\n").unwrap();
+    let sh = |script: &str, dir: &Path| {
+        std::process::Command::new("bash")
+            .arg("-c")
+            .arg(script)
+            .current_dir(dir)
+            .output()
+            .expect("bash")
+    };
+
+    let out = sh(&format!("bin=built ; {stage}"), &src);
+    assert!(out.status.success(), "staging: {}", String::from_utf8_lossy(&out.stderr));
+
+    let out = sh(&pack, &src);
+    assert!(out.status.success(), "packing: {}", String::from_utf8_lossy(&out.stderr));
+
+    let dst = scratch("tar-dst");
+    let asset = format!("cicada-{target}.tar.gz");
+    std::fs::copy(src.join(&asset), dst.join(&asset)).unwrap();
+
+    // The action's own extraction line, with the variables it reads supplied.
+    let script = format!("tmp={} ; asset={asset} ; {unpack}", dst.display());
+    let out = sh(&script, &dst);
+    assert!(out.status.success(), "unpacking: {}", String::from_utf8_lossy(&out.stderr));
+
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(dst.join("cicada")).unwrap().permissions().mode();
+    assert_eq!(
+        mode & 0o111,
+        0o111,
+        "the extracted cicada is not executable (mode {mode:o}) — the archive did not \
+         carry the bit, which is the only reason it is an archive"
+    );
+
+    let _ = std::fs::remove_dir_all(&src);
+    let _ = std::fs::remove_dir_all(&dst);
 }

@@ -111,15 +111,22 @@ jobs:
             exit 1
           fi
 
-          # The name `action.yml` downloads. Flat file, not a tarball: the action
-          # curls it straight to disk and chmods it.
-          mv "$bin" "cicada-${{ matrix.target }}"
-          ./"cicada-${{ matrix.target }}" --version
+          # The tarball is the unit of publication, and it is built *here*
+          # rather than in a later job because the executable bit does not
+          # survive any other route. GitHub release assets carry no permissions,
+          # and neither does actions/upload-artifact — so a bare binary arrives
+          # at the far end non-executable, and anyone who downloads it by hand
+          # gets "Permission denied". Inside a tar the mode is recorded and
+          # travels intact.
+          install -m755 "$bin" cicada
+          tar czf "cicada-${{ matrix.target }}.tar.gz" cicada
+          ./cicada --version
+          tar tvzf "cicada-${{ matrix.target }}.tar.gz"
 
       - uses: actions/upload-artifact@v4
         with:
           name: cicada-${{ matrix.target }}
-          path: cicada-${{ matrix.target }}
+          path: cicada-${{ matrix.target }}.tar.gz
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
@@ -140,7 +147,7 @@ jobs:
           # Plain `sha256sum` output, in sorted order so the file is a
           # deterministic function of its inputs. The format matters: `action.yml`
           # verifies with `sha256sum -c`, which wants exactly this.
-          ls cicada-* | sort | xargs sha256sum > SHA256SUMS
+          ls cicada-*.tar.gz | sort | xargs sha256sum > SHA256SUMS
           cat SHA256SUMS
 
       - name: Wait for the release object
@@ -185,7 +192,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         # `--clobber` so a re-run repairs a partial upload instead of failing on
         # the assets that already landed.
-        run: gh release upload "$TAG" dist/cicada-* dist/SHA256SUMS --clobber
+        run: gh release upload "$TAG" dist/cicada-*.tar.gz dist/SHA256SUMS --clobber
 
   # ---------------------------------------------------------------------------
   image:
@@ -202,13 +209,19 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Name the binaries the way buildx asks for them
+      - name: Unpack, named the way buildx asks for them
         run: |
           set -euo pipefail
           # `TARGETARCH` is Docker's spelling (amd64/arm64), not the Rust triple's.
-          mv dist/cicada-x86_64-unknown-linux-musl  dist/cicada-amd64
-          mv dist/cicada-aarch64-unknown-linux-musl dist/cicada-arm64
+          for pair in amd64:x86_64 arm64:aarch64; do
+            docker_arch="${pair%%:*}"
+            rust_arch="${pair##*:}"
+            tar xzf "dist/cicada-${rust_arch}-unknown-linux-musl.tar.gz" -C dist
+            mv dist/cicada "dist/cicada-${docker_arch}"
+          done
+          # tar restored the mode; this is belt and braces, and cheap.
           chmod +x dist/cicada-amd64 dist/cicada-arm64
+          ls -l dist/
 
       - name: Compute the tags
         id: tags
