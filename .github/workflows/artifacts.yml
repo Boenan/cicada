@@ -281,7 +281,7 @@ jobs:
           echo "tags=${tags}"    >> "$GITHUB_OUTPUT"
           echo "$tags"
 
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
         # Only for the `apk add` and the sanity check in the arm64 layer — the
         # binary itself was built natively and is merely copied in.
         with:
