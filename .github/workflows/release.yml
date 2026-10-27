@@ -22,7 +22,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history, or the changelog is silently incomplete. cicada errors
           # on a shallow clone rather than guessing, but nobody should have to
