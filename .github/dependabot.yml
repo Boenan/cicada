@@ -14,6 +14,32 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Version updates default to `direct`, which for cargo means only what
+    # Cargo.toml names. rustls, rustls-webpki and webpki-roots are reached only
+    # through ureq, so a fixed release of theirs never produced a PR, and the
+    # scheduled audit was the first thing to notice (RUSTSEC-2026-0346..0349,
+    # 0381, 0382). `all` adds the transitive graph that cargo resolves into
+    # Cargo.lock, which is the graph the audit job checks.
+    allow:
+      - dependency-type: all
+    groups:
+      # One PR per advisory batch, not one per crate. A TLS fix often moves
+      # rustls and rustls-webpki together, and two PRs that each touch
+      # Cargo.lock conflict as soon as the first one merges.
+      #
+      # Applies only when security updates are on in the repository settings;
+      # this file configures them but cannot enable them.
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+      # With `all`, minor and patch bumps come every week, most of them
+      # lock-only. Grouped, they are one PR to review rather than a queue
+      # against the limit above. Majors stay separate: they are the ones that
+      # can break the build.
+      lockfile:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
     commit-message:
       # Conventional commits are not a style choice in this repo — cicada
       # computes its own release from them, and `chore` is the type that
