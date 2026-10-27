@@ -2,6 +2,14 @@
 
 <!-- cicada:insert -->
 
+## 0.2.3 (2026-10-27)
+
+### Bug Fixes
+
+* set version on github action (#30) ([32ea667](https://github.com/boenan/cicada/commit/32ea66752a3243607d7f03f8dccec26cbc6bb0b3))
+
+[Compare with 0.2.2](https://github.com/boenan/cicada/compare/v0.2.2...v0.2.3)
+
 ## 0.2.2 (2026-09-22)
 
 ### Bug Fixes
