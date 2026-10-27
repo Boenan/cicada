@@ -27,5 +27,13 @@ changelog  = "CHANGELOG.md"
 kind = "cargo"
 path = "cicada/Cargo.toml"       # inherits, so the bump lands on [workspace.package]
 
+# The action's default `version`. `uses: boenan/cicada@v0` reads action.yml at
+# whatever commit `v0` points to, and that commit is a release commit, so the
+# version written here is the one whose binaries the action downloads.
+[[packages.cicada.updaters]]
+kind = "generic"
+path = "action.yml"
+edit = { marker = "x-cicada-version" }
+
 # no [umbrella] — a single-service repo has no aggregate version to declare (#73)
 # no [changelog] — the built-in five-row default is what this repo wants (#48)

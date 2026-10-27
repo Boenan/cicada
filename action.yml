@@ -34,10 +34,15 @@ inputs:
 
   version:
     description: >
-      The cicada version to install, e.g. `v1.2.3`. Defaults to the tag this
-      action was referenced at, so `uses: org/cicada@v1` installs cicada v1.
+      The cicada version to install, e.g. `v1.2.3`. Defaults to the release
+      this copy of the action belongs to, so `uses: org/cicada@v0` installs the
+      release the moving `v0` tag currently points at.
     required: false
-    default: ''
+    # Written by cicada's own release PR (the `marker` updater in cicada.toml),
+    # so every release tag carries its own version here. The ref in `uses:` is
+    # not usable for this: `v0` and `v0.2` are moving git tags with no release
+    # of their own, and `releases/download/v0` is a 404.
+    default: 'v0.2.2'  # x-cicada-version
 
   args:
     description: Extra arguments appended to the command, e.g. `--dry-run`.
@@ -77,11 +82,7 @@ runs:
 
         version="${{ inputs.version }}"
         if [ -z "$version" ]; then
-          # `uses: org/cicada@v1` → GITHUB_ACTION_REF is `v1`.
-          version="${GITHUB_ACTION_REF:-}"
-        fi
-        if [ -z "$version" ]; then
-          echo "::error::cannot tell which cicada version to install; set the \`version\` input" >&2
+          echo "::error::the \`version\` input is empty; leave it unset or name a release, e.g. v0.2.2" >&2
           exit 1
         fi
 
