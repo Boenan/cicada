@@ -25,7 +25,7 @@ saphyr-parser = "0.2.2"
 serde_json = "1"
 # default features only: builtins + debug + deserialization. No filesystem loader,
 # so minijinja stays inside cicada-core's no-I/O rule (#29).
-minijinja = "2"
+minijinja = "3"
 
 # I/O — cicada only
 anyhow  = "1"
