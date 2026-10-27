@@ -1,9 +1,10 @@
 # cicada
 
-Release automation driven by conventional commits: versions, changelogs, tags and releases.
-In the spirit of [release-please](https://github.com/googleapis/release-please), but **git is the substrate
-and the forge API is a thin edge** — which is what makes it work on GitHub and GitLab from one code path,
-and what lets you rehearse a release on your laptop with no token and no network.
+cicada is a release tool. It reads conventional commits and makes versions, changelogs, tags and releases.
+It is similar to [release-please](https://github.com/googleapis/release-please), with one important
+difference. **cicada does its work with git, and it uses the forge API only for a small number of
+operations.** (A forge is a code host, such as GitHub or GitLab.) Because of this design, one code path
+supports GitHub and GitLab. You can also rehearse a release on your computer with no token and no network.
 
 ```
 push to main  →  cicada opens a release PR  →  you merge it  →  cicada tags and releases
@@ -21,11 +22,11 @@ push to main  →  cicada opens a release PR  →  you merge it  →  cicada tag
 
 ## Installing
 
-**On GitHub Actions, you do not install it at all** — `uses: boenan/cicada@v0` downloads and verifies the
-binary for you. Same on GitLab: the shipped template runs the image. The rest of this section is for
-everywhere else.
+**On GitHub Actions, you do not install cicada.** The step `uses: boenan/cicada@v0` downloads the binary
+and verifies it. On GitLab, the shipped template runs the cicada image. The rest of this section applies to
+all other environments.
 
-**A released binary.** Static musl builds, attached to every release with a `SHA256SUMS` beside them:
+**A released binary.** Each release contains static musl builds and a `SHA256SUMS` file:
 
 ```bash
 base=https://github.com/boenan/cicada/releases/latest/download
@@ -38,36 +39,37 @@ tar xzf "$asset"
 install -m755 cicada /usr/local/bin/cicada
 ```
 
-The archive holds a single `cicada`, already executable. That is why it is an archive: a GitHub
-release asset carries no permissions, so a bare binary downloads without its executable bit and has
-to be `chmod`-ed before it will run.
+The archive contains one file, `cicada`, and that file is already executable. This is the reason for the
+archive. A GitHub release asset has no file permissions. Thus a bare binary downloads without its executable
+bit, and you must run `chmod` on it before it can run.
 
-`--ignore-missing` because `SHA256SUMS` lists every architecture and you downloaded one. It still fails if
-the file you did download is not in there, so it is a check rather than a formality.
+The command uses `--ignore-missing` because `SHA256SUMS` lists all architectures, and you downloaded only
+one. The check still fails if `SHA256SUMS` does not list the file that you downloaded. Thus it is a real check.
 
-**The image.** It carries `git`, which cicada requires (#17) and will not start without:
+**The image.** The image contains `git`. cicada requires git (#17) and does not start without it:
 
 ```bash
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/repo" -w /repo ghcr.io/boenan/cicada:v0 cicada plan
 ```
 
-The `-u` is not optional in that line. Without it the container is root, your checkout is not, and git
-refuses to operate on a repository it considers dubiously owned. The fix that suggests itself — baking
-`safe.directory` into the image — does **not** work: cicada runs git with `GIT_CONFIG_NOSYSTEM=1`, so the
-image's system config is not read at all.
+The `-u` option in this line is necessary. Without it, the container runs as root, but your user owns the
+checkout. git then refuses to operate on a repository with a "dubious" owner. One possible solution is to set
+`safe.directory` in the image. This solution does **not** work. cicada runs git with `GIT_CONFIG_NOSYSTEM=1`, so
+git does not read the system configuration of the image.
 
-Tags are `v1.2.3` exactly, plus `v1.2`, `v1` and `latest` moving with each stable release. **A prerelease
-publishes only its exact tag**, so `:v0` never quietly resolves to an alpha.
+Each release publishes its exact tag, for example `v1.2.3`. Each stable release also moves the tags `v1.2`,
+`v1` and `latest`. **A prerelease publishes only its exact tag.** Thus `:v0` never points to an alpha.
 
-**Or `cargo install cicada`**, which works anywhere Rust does — including the platforms the binaries and
-images do not cover.
+**Or use `cargo install cicada`.** This works on all platforms that Rust supports. These include the
+platforms that the binaries and images do not support.
 
 ---
 
 ## Quick start
 
-**1. Write `cicada.toml` at the repo root.** There is no `cicada init` — the package list is yours to own,
-and a scanner's guesses need reviewing line by line anyway. For a single-service Rust repo:
+**1. Write `cicada.toml` at the root of the repository.** cicada has no `cicada init` command. You control
+the package list. Also, you must examine each line that a scanner guesses. This example is for a repository
+with one Rust service:
 
 ```toml
 [settings]
@@ -87,14 +89,14 @@ kind = "cargo"
 path = "Cargo.toml"
 ```
 
-**2. Check it.** No token, no network:
+**2. Check the configuration.** This step needs no token and no network:
 
 ```console
 $ cicada check
 ✓ config ok
 ```
 
-**3. Rehearse.** Still nothing written:
+**3. Rehearse the release.** This step also writes nothing:
 
 ```console
 $ cicada plan
@@ -105,7 +107,7 @@ $ cicada plan
   1 release
 ```
 
-**4. See the exact bytes**, and then a real local commit you can inspect with `git show`:
+**4. See the exact bytes.** Then make a real local commit, and examine it with `git show`:
 
 ```console
 $ cicada release-pr --dry-run     # prints the diff it would write
@@ -113,29 +115,36 @@ $ cicada release-pr --no-push     # writes a real commit on cicada/main; pushes 
 $ git show cicada/main
 ```
 
-**5. Wire up CI** (below), and cicada does the rest.
+**5. Configure CI** (see [CI](#ci)). cicada then does the remaining work.
 
 ---
 
 ## ⚠ The CI-trigger footgun
 
-**Read this before anything else fails mysteriously.**
+A "footgun" is a setting that is easy to get wrong and that causes damage without a warning. **Read this
+section first.** If you do not, your releases can stop and you get no error message.
 
-On GitHub, the default `GITHUB_TOKEN` **does not trigger workflows on pull requests it creates**. On GitLab,
-`CI_JOB_TOKEN` has the same problem for merge requests.
+On GitHub, the default `GITHUB_TOKEN` **does not start workflows on pull requests that it creates**. On
+GitLab, `CI_JOB_TOKEN` has the same problem for merge requests.
 
-The failure is silent and looks like success: cicada opens the release PR, the PR's checks never start, and
-it sits open looking perfectly healthy. If you have enabled auto-merge, the merge is gated on checks that
-will never run, so **the loop never turns at all**.
+You get no error, and the result looks like success. cicada opens the release PR, but the checks of the PR
+never start. The PR stays open and looks healthy. If you enabled auto-merge, the merge waits for checks that
+never run. Thus **the release cycle stops completely**.
 
-Use a **PAT or GitHub App token** (GitHub) or a **Project Access Token** (GitLab). This is not a convenience.
+On GitHub, use a **PAT or a GitHub App token**. On GitLab, use a **Project Access Token**. This is a
+requirement, not a convenience.
 
-**And on GitHub, set `persist-credentials: false` on `actions/checkout`.** Without it the checkout writes
-`GITHUB_TOKEN` into `.git/config` as an `http.<url>.extraheader`, git matches that against cicada's push URL,
-and the push authenticates as `GITHUB_TOKEN` however correct your PAT is. The push *succeeds*, so nothing
-looks wrong — but the tag it pushed was created by `GITHUB_TOKEN`, so no workflow reacts to it, and any
-release-artifact job you have never runs. cicada wants none of those credentials: it derives its own push URL
-and answers git through `GIT_ASKPASS`.
+**On GitHub, also set `persist-credentials: false` on `actions/checkout`.** Without this setting, this
+occurs:
+
+1. The checkout writes `GITHUB_TOKEN` into `.git/config` as an `http.<url>.extraheader`.
+2. git matches that header against the push URL of cicada.
+3. The push authenticates as `GITHUB_TOKEN`, even if your PAT is correct.
+4. The push *succeeds*, so you see no problem.
+5. But `GITHUB_TOKEN` created the tag, so no workflow starts for it. Your release-artifact jobs never run.
+
+cicada does not use these credentials. It makes its own push URL and gives git the token through
+`GIT_ASKPASS`.
 
 ---
 
@@ -163,13 +172,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0             # full history, or the changelog is incomplete
-          persist-credentials: false # or GITHUB_TOKEN hijacks cicada's push — see below
+          persist-credentials: false # or GITHUB_TOKEN hijacks cicada's push — see above
       - uses: boenan/cicada@v0
         with:
           token: ${{ secrets.CICADA_TOKEN }}   # see the footgun above
 ```
 
-You also need **Settings → Actions → Allow GitHub Actions to create and approve pull requests**.
+You must also enable **Settings → Actions → Allow GitHub Actions to create and approve pull requests**.
 
 ### GitLab
 
@@ -178,35 +187,47 @@ include:
   - remote: https://raw.githubusercontent.com/boenan/cicada/v0/ci/gitlab-ci.yml
 ```
 
-That ships `cicada:release` (ready to use) and `cicada:check` (lints a merge request's commits), plus a
-hidden `.cicada` job to extend. `GIT_DEPTH: 0` and `resource_group` are baked in. Set `CICADA_TOKEN` to a
-Project Access Token with **Maintainer** role and the `api` + `write_repository` scopes.
+This template contains three jobs:
+
+- `cicada:release`: ready to use.
+- `cicada:check`: checks the commits of a merge request.
+- `.cicada`: a hidden job that you can extend.
+
+The template already sets `GIT_DEPTH: 0` and `resource_group`. Set `CICADA_TOKEN` to a Project Access Token
+with the **Maintainer** role and the `api` and `write_repository` scopes.
 
 ### Building artifacts
 
-cicada does **not** build your binaries or images. It owns versioning, changelogs, tags and release objects;
-your artifacts are built by a **separate workflow triggered by the tag cicada pushes**. Keeping them apart
-means an artifact build can fail and be retried without touching version state.
+cicada does **not** build your binaries or images. cicada controls versions, changelogs, tags and release
+objects. **A separate workflow builds your artifacts, and the tag that cicada pushes starts that workflow.**
+Because of this separation, an artifact build can fail and run again with no change to the version state.
 
 ---
 
 ## How it works
 
-Two phases, and `cicada run` does both **in the right order** — which is why you should call `run` rather
-than wiring the two yourself.
+cicada has two phases. `cicada run` does the two phases **in the correct order**. For this reason, we
+recommend that you call `run` and do not call each phase yourself.
 
-**Phase A — `cicada release-pr`.** Reads `anchor..HEAD` per package, routes commits by conventional-commit
-scope, computes versions, writes version files and changelogs onto a branch named `cicada/{branch}`, and
-opens a pull request. The branch is **replaced** every run, never updated — it holds exactly one commit that
-is a pure function of your current tip, so there is never a conflict to resolve.
+**Phase A — `cicada release-pr`.** For each package, this phase does these steps:
 
-**Phase B — `cicada release`.** Stateless reconciliation: for each recorded version, does its tag exist, and
-does a release object exist for it? Create whatever is missing. Nothing is read back from the forge to
-decide anything, so it is immune to squash-merge, rebase-merge and rewritten commit messages, and re-running
-is a no-op.
+1. It reads the commits in `anchor..HEAD`.
+2. It assigns each commit to a package by its conventional-commit scope.
+3. It calculates the versions.
+4. It writes the version files and changelogs on a branch named `cicada/{branch}`.
+5. It opens a pull request.
 
-**Phase B runs first.** Both fire on the same push, and A-before-B would compute its range from the *old*
-tag, re-include everything the just-merged release contained, and propose releasing it again — every cycle.
+cicada **replaces** this branch on each run. It never updates it. The branch holds exactly one commit, and
+that commit depends only on the current tip of your branch. Thus you never get a conflict.
+
+**Phase B — `cicada release`.** This phase keeps no state. For each recorded version, it asks two questions.
+Does the tag exist? Does a release object exist? It then creates each item that is missing. It reads nothing
+back from the forge to make a decision. Thus squash-merge, rebase-merge and changed commit messages have no
+effect on it. If you run it again, it does nothing.
+
+**Phase B runs first.** The same push starts both phases. If Phase A ran first, it would calculate its range
+from the *old* tag. It would then include again all commits of the release that you just merged. It would
+propose that release again, on each cycle.
 
 ### Two files
 
@@ -215,14 +236,15 @@ tag, re-include everything the just-merged release contained, and propose releas
 | `cicada.toml` | you | configuration |
 | `.cicada-versions.toml` | cicada | a version per package, and nothing else |
 
-`.cicada-versions.toml` is the **sole source of truth** for versions. `Cargo.toml`, `Chart.yaml` and friends
-are *outputs* — cicada never reads a version back out of them. The visible consequence: a first release
-computed as `0.0.1` rewrites a `cargo new` manifest from `0.1.0` **downwards**, and that is correct.
+`.cicada-versions.toml` is the **only source of truth** for versions. `Cargo.toml`, `Chart.yaml` and similar
+files are *outputs*. cicada never reads a version from them. This has one visible result. If cicada
+calculates `0.0.1` for a first release, it changes a `cargo new` manifest from `0.1.0` **down** to `0.0.1`.
+This is correct.
 
 ### The release manifest
 
-Every run that releases anything writes `target/cicada/release-manifest.json` — the set of things that
-shipped **together**, which is what a deploy step actually needs:
+Each run that releases a package writes `target/cicada/release-manifest.json`. This file lists the releases
+that shipped **together**. A deploy step needs this information:
 
 ```json
 {
@@ -234,20 +256,28 @@ shipped **together**, which is what a deploy step actually needs:
 }
 ```
 
-Add `target/cicada/` to `.gitignore` if `target/` is not already there — it describes a run, not a state of
-the repository, and is never committed.
+Add `target/cicada/` to `.gitignore` if `target/` is not already in it. The file describes one run, not a
+state of the repository. Do not commit it.
 
-The same JSON is embedded in **every** release object the run creates, inside a collapsed `<details>` block,
-so a reader of any one release can answer *what else shipped with this?* without knowing which release is
-the summary. The file on disk is the only way to inspect a `--no-push` rehearsal, and it lets the deploy job
-read the result without a token and an API round trip.
+cicada also puts the same JSON into **each** release object that the run creates, in a collapsed
+`<details>` block. Thus a reader of any one release can see what else shipped with it. The reader does not
+need to know which release is the summary.
+
+The file on disk has two more uses:
+
+- It is the only way to examine a `--no-push` rehearsal.
+- It lets the deploy job read the result without a token and without an API call.
 
 ### The tag is the anchor
 
-There is no stored commit SHA anywhere. The recorded version becomes a tag name, that tag is resolved, and it
-must be **reachable from HEAD**. A missing tag is a hard error naming the repair; a tag that exists on
-another branch is a version collision. Both are loud, because the alternative — a resolvable-but-wrong range
-— produces a changelog that looks fine and is incomplete.
+cicada stores no commit SHA. The recorded version gives a tag name. cicada finds that tag, and the tag must
+be **reachable from HEAD**. These two errors can occur:
+
+- **The tag is missing.** cicada stops with an error that tells you how to repair the problem.
+- **The tag exists on a different branch.** cicada reports a version collision.
+
+cicada makes both errors loud for a reason. The alternative is a range that resolves but is wrong. That
+range gives a changelog that looks correct but is incomplete.
 
 ---
 
@@ -255,13 +285,13 @@ another branch is a version collision. Both are loud, because the alternative �
 
 ### One package
 
-The shape in Quick start. Unscoped commits route to it via `default_scope`, so `feat: add export` and
-`feat(app): add export` are the same commit.
+This is the configuration from Quick start. `default_scope` assigns unscoped commits to this package. Thus
+cicada treats `feat: add export` and `feat(app): add export` as the same commit.
 
 ### An app and its Helm chart
 
-Two packages with **independent version lines** — never an umbrella and a child. They relate through
-`app_version.track`, and nothing else.
+The two packages have **independent version lines**. One package is never an umbrella of the other. Their
+only relation is `app_version.track`.
 
 ```toml
 [settings]
@@ -293,9 +323,12 @@ app_version     = { track = "app" }   # appVersion mirrors `app`
 on_tracked_bump = "patch"             # the chart's own bump when `app` releases
 ```
 
-Releasing `app` drags the chart: its `appVersion` is rewritten (always **quoted** — `appVersion: 1.10` is
-the float `1.1` to YAML) and it takes a patch bump, because a changed chart artifact needs a new chart
-version. Its changelog entry says so rather than rendering empty.
+When `app` releases, the chart also changes:
+
+- cicada changes the `appVersion` of the chart. The value always has **quotes**, because YAML reads
+  `appVersion: 1.10` as the float `1.1`.
+- The chart gets a patch bump, because a changed chart artifact needs a new chart version.
+- The changelog entry of the chart gives this reason, so the entry is not empty.
 
 ### A monorepo
 
@@ -322,33 +355,33 @@ path       = "services/worker"
 tag_format = "worker-v{version}"
 ```
 
-Attribution is **by scope and nothing else** — no path heuristics, no dependency graph. `feat(api,worker):`
-releases both, because the author knows whether a shared change breaks its consumers and a graph does not.
-Each package has its own anchor, so each has its own range and they release at different times without any
-coordination.
+cicada assigns commits to packages **only by scope**. It does not use file paths or a dependency graph.
+`feat(api,worker):` releases both packages. The reason: the author knows if a shared change breaks its
+consumers, but a graph does not. Each package has its own anchor. Thus each package has its own range, and
+the packages release at different times with no coordination.
 
-The umbrella aggregates the **bump kind**, not the number: `api` going `1.4.2 → 2.0.0` makes the umbrella
-take *a major bump on its own line*.
+The umbrella uses the **bump type** of its packages, not their numbers. For example, if `api` goes from
+`1.4.2 → 2.0.0`, the umbrella gets *a major bump on its own version line*.
 
 ---
 
 ## Adopting into a repo that already has releases
 
-Two steps, both by hand and both small:
+You do two small steps by hand:
 
 1. Write `cicada.toml`.
-2. Seed `.cicada-versions.toml` with the current version of each package:
+2. Write the current version of each package into `.cicada-versions.toml`:
 
 ```toml
 [packages.api]
 version = "1.4.2"
 ```
 
-The tag that version names (`api-v1.4.2` here) must **exist and be reachable** from the branch you release
-from. That is the only requirement — there is no import step and no state to migrate.
+The tag of that version (`api-v1.4.2` in this example) must **exist and be reachable** from the branch that
+you release from. This is the only requirement. There is no import step and no state to migrate.
 
-`Release-As:` footers left over from release-please are **ignored**, not honoured and not an error, so
-history carrying them is fine.
+cicada **ignores** the `Release-As:` footers from release-please. It does not use them, and it does not
+report an error. Thus a history that contains them is not a problem.
 
 ---
 
@@ -363,7 +396,7 @@ cicada run        [--dry-run] [--no-push]     Phase B then Phase A — what CI c
 cicada template print <name>                  emit a built-in template
 ```
 
-Global: `--token`, `--config`, `--date`, `--prerelease <id>`, `--json`, `-v`, `--quiet`.
+Global options: `--token`, `--config`, `--date`, `--prerelease <id>`, `--json`, `-v`, `--quiet`.
 
 ### What needs a token
 
@@ -374,12 +407,12 @@ Global: `--token`, `--config`, `--date`, `--prerelease <id>`, `--json`, `-v`, `-
 | `--no-push` | ✓ | ✓ | — | — | not required |
 | default | ✓ | ✓ | ✓ | ✓ | required |
 
-`plan` and `check` never acquire a network dependency. That is a guarantee, not an implementation detail —
-it is what lets `check` run on an untrusted fork's pull request where no token exists.
+`plan` and `check` never need the network. This is a guarantee, not an implementation detail. Because of
+this guarantee, `check` can run on a pull request from an untrusted fork, where no token is available.
 
 ### Exit codes
 
-CI branches on these, so they are a contract:
+CI uses these codes to make decisions, so they are a contract:
 
 | Code | Meaning |
 |---|---|
@@ -389,81 +422,96 @@ CI branches on these, so they are a contract:
 | `3` | `check` found problems |
 | `4` | **Refused** — cicada declined to act |
 
-`3` and `4` are separate from `1` on purpose: *your commits are malformed* and *cicada declined to act* are
-conditions a pipeline may want to handle differently from *cicada broke*.
+Codes `3` and `4` are different from `1` on purpose. A pipeline can handle each of these conditions in a
+different way:
+
+- *Your commits are malformed* (`3`).
+- *cicada refused to act* (`4`).
+- *cicada failed* (`1`).
 
 ---
 
 ## When cicada refuses
 
-Exit `4` always means cicada could have done something and decided it would be wrong. Each refusal names the
-repair.
+Exit code `4` always means this: cicada could act, but it decided that the action would be wrong. Each
+refusal tells you how to repair the problem.
 
-| Refusal | Why | Fix |
+| Refusal | Why | Repair |
 |---|---|---|
-| A `feat:` on a `maintenance_branches` line | A maintenance line promises its consumers only patches. Clamping it to a patch would ship a feature — or a breaking change — where nobody sees it | Put the change on a newer line, or re-do the cherry-pick as the fix it is. **There is no override** |
-| The release PR branch has a commit cicada did not write | That commit exists nowhere else, so discarding it would lose it | Move it to the base branch, then delete or reset `cicada/<branch>` |
-| The release PR was merged while stale | The recorded version is lower than the commits justify, so shipping it would break the semver contract silently | Correct the version in `.cicada-versions.toml` upwards and push |
-| A computed version's tag exists elsewhere | Two release lines are converging on one number | Reconcile the lines before releasing either |
-| A prerelease that sorts below the open one | Semver's ordering is what consumers resolve against | Pick an identifier that sorts up, or release the line stable |
+| A `feat:` on a `maintenance_branches` line | A maintenance line promises only patches to its consumers. If cicada changed the feature to a patch, it would ship a feature, or a breaking change, that nobody sees | Put the change on a newer line. If the change is really a fix, do the cherry-pick again as a `fix:` commit. **No override exists** |
+| The release PR branch has a commit that cicada did not write | That commit exists only on this branch. If cicada discarded the branch, the commit would be lost | Move the commit to the base branch. Then delete or reset `cicada/<branch>` |
+| Someone merged the release PR while it was stale | The recorded version is lower than the commits require. A release would break the semver contract with no warning | Increase the version in `.cicada-versions.toml` to the correct value, and push |
+| The tag of a calculated version exists on a different branch | Two release lines are moving to the same version number | Make the two lines agree before you release either line |
+| A prerelease that sorts below the open prerelease | Consumers resolve versions by semver order | Use an identifier that sorts higher, or make a stable release of the line |
 
-A stale release PR is also **drafted, labelled `cicada:stale` and commented on**, because draft PRs are
-unmergeable on both forges — refusing is only safe if the thing you refused to refresh cannot be merged.
+cicada also changes a stale release PR to a **draft**, adds the `cicada:stale` label, and adds a comment.
+Neither forge lets you merge a draft PR. A refusal is safe only if nobody can merge the PR that cicada
+refused to update.
 
 ---
 
 ## Changelogs and templates
 
-Changelog entries and release notes come from **one** template, so they cannot drift. The built-ins are
-printable, so customising starts from the real thing rather than from reverse-engineering it:
+Changelog entries and release notes come from **one** template. Thus they cannot become different from each
+other. You can print the built-in templates. Thus you can start a custom template from the real template,
+not from a guess:
 
 ```console
 $ cicada template print notes > .cicada/templates/notes.md.j2
 ```
 
-Overrides are picked up by convention with no config change. Available: `notes`, `changelog`, `umbrella`,
-`changelog-header`.
+cicada finds a custom template by its file location. You do not change the configuration. The available
+templates are `notes`, `changelog`, `umbrella` and `changelog-header`.
 
-Entries are inserted at `<!-- cicada:insert -->` when present, prepended after the header otherwise, and the
-file is created when absent. Existing entries are never rewritten, so a hand-corrected one stays corrected.
+cicada writes the changelog as follows:
+
+- If the file contains `<!-- cicada:insert -->`, cicada adds new entries at that marker.
+- If the marker is not there, cicada adds new entries after the header.
+- If the file does not exist, cicada creates it.
+
+cicada never changes existing entries. Thus an entry that you corrected by hand stays correct.
 
 ---
 
 ## Prereleases
 
-Branch-level, never per-package:
+You configure prereleases per branch, never per package:
 
 ```toml
 prerelease_branches   = ["prerelease-v*-rc"]
 prerelease_identifier = "rc"
 ```
 
-`version` in the versions file keeps meaning **last stable release**, and a `prerelease` key tracks the open
-line. Every release — `rc.1`, `rc.2`, and the eventual stable — computes from the same last-stable anchor,
-so the notes are cumulative and the stable changelog entry comes out complete.
+In the versions file, `version` always means the **last stable release**. A `prerelease` key records the
+open prerelease line. cicada calculates each release (`rc.1`, `rc.2` and the final stable release) from the
+same last stable anchor. Thus the notes include all changes since that anchor, and the changelog entry of
+the stable release is complete.
 
-Prereleases write version files and cut tags and release objects, but **never** `CHANGELOG.md`. A line walks
-the ladder by editing `prerelease_identifier` (`alpha` → `beta` → `rc`); the counter resets when either the
-base or the identifier changes. Ordering comes from semver alone, so an identifier that sorts *down* is
-refused — pick names that sort upward.
+Prereleases write version files, tags and release objects. But they **never** write `CHANGELOG.md`.
 
-`cicada release-pr --prerelease rc` does the same thing ad hoc, without a branch.
+To move a line to the next stage, change `prerelease_identifier` (`alpha` → `beta` → `rc`). The counter
+resets when the base version or the identifier changes. The order comes only from semver. Thus cicada
+refuses an identifier that sorts *lower* than the current one. Use names that sort higher.
+
+`cicada release-pr --prerelease rc` does the same thing for one run, without a branch.
 
 ---
 
 ## Requirements
 
-- **`git` on PATH**, 2.20 or newer. cicada shells out to it; that is the design, not an accident.
-- **A full clone.** `fetch-depth: 0` / `GIT_DEPTH: 0`. cicada detects a shallow clone and errors rather than
-  computing a silently truncated changelog.
-- **Linux**, x86_64 or aarch64, for the shipped binaries and images. `cargo install cicada` works anywhere
-  Rust does.
+- **`git` on PATH**, version 2.20 or newer. cicada runs git for its operations. This is part of the design,
+  not an accident.
+- **A full clone**: `fetch-depth: 0` on GitHub, or `GIT_DEPTH: 0` on GitLab. cicada detects a shallow clone
+  and stops with an error. It does not calculate a changelog that is incomplete without a warning.
+- **Linux** on x86_64 or aarch64, for the shipped binaries and images. `cargo install cicada` works on all
+  platforms that Rust supports.
 
 ## Documentation
 
-- [`docs/design.md`](docs/design.md) — the full design, with every decision and its reasoning
-- [`docs/scenarios/`](docs/scenarios/) — behavioural coverage, written as executable scenarios
-- [`docs/future-work.md`](docs/future-work.md) — what was deliberately deferred, and what would trigger it
+- [`docs/design.md`](docs/design.md): the full design, with each decision and its reason.
+- [`docs/scenarios/`](docs/scenarios/): tests of the behavior, written as executable scenarios.
+- [`docs/future-work.md`](docs/future-work.md): the features that we did not do yet, on purpose, and the
+  conditions that would make us start them.
 
 ## Licence
 
