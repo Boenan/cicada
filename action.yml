@@ -42,7 +42,7 @@ inputs:
     # so every release tag carries its own version here. The ref in `uses:` is
     # not usable for this: `v0` and `v0.2` are moving git tags with no release
     # of their own, and `releases/download/v0` is a 404.
-    default: 'v0.2.2'  # x-cicada-version
+    default: 'v0.2.3'  # x-cicada-version
 
   args:
     description: Extra arguments appended to the command, e.g. `--dry-run`.
