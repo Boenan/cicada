@@ -48,10 +48,9 @@ jobs:
 
       # THE BOOTSTRAP. `uses: ./` runs the composite action, and that action
       # installs cicada by downloading a released binary — which, on the run that
-      # cuts the *first* release, does not exist. There is no version to download
-      # either: `GITHUB_ACTION_REF` is how the action learns which release to
-      # fetch, and a local `uses: ./` has no ref, so it would fail with "cannot
-      # tell which cicada version to install".
+      # cuts the *first* release, does not exist. Later runs are no better: the
+      # action's default `version` is the release HEAD was last cut at, so a
+      # download would release this repo with the previous binary.
       #
       # The action's first branch is the way out, and it is there on purpose:
       # an already-installed cicada is used as-is, "a self-hosted runner with it

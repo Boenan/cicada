@@ -690,6 +690,58 @@ fn the_moving_major_tag_the_readme_relies_on_is_published() {
 }
 
 #[test]
+fn the_action_installs_the_release_it_was_tagged_with() {
+    // The other half of the test above. Publishing `v0` made `uses: …@v0`
+    // resolve, and the action then took the version from that ref and
+    // downloaded from `releases/download/v0` — a 404, because only exact tags
+    // have releases. Nothing caught it: this repo's own release builds cicada
+    // from source, so its `uses: ./` never downloads anything.
+    //
+    // Now the version is a default in action.yml that the release PR writes, so
+    // the copy of action.yml at any release tag names that release. Two things
+    // keep that true: the value matches the version being built, and the
+    // updater that moves it is still configured.
+    let action = read("action.yml");
+    let line = action
+        .lines()
+        .find(|l| l.contains("# x-cicada-version"))
+        .expect("action.yml no longer marks its default version for cicada to bump");
+    assert!(
+        line.trim_start().starts_with("default: "),
+        "the marker is on `{}`, not on the `version` input's default",
+        line.trim()
+    );
+
+    let cargo = read("Cargo.toml");
+    let version = cargo
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("version = "))
+        .expect("the workspace must declare a version")
+        .trim()
+        .trim_matches('"');
+    assert!(
+        line.contains(&format!("'v{version}'")),
+        "action.yml defaults to `{}` but this repo builds {version}, so `@v0` \
+         would install a release other than the one it points at",
+        line.trim()
+    );
+
+    let config = read("cicada.toml");
+    assert!(
+        config.contains(r#"path = "action.yml""#)
+            && config.contains(r#"edit = { marker = "x-cicada-version" }"#),
+        "cicada.toml no longer bumps action.yml, so the next release would ship \
+         an action that installs the previous one"
+    );
+
+    // The ref is not a version: reading GITHUB_ACTION_REF is the bug above.
+    assert!(
+        !action.contains("GITHUB_ACTION_REF"),
+        "the action takes its version from the `uses:` ref again, which is `v0`"
+    );
+}
+
+#[test]
 fn ci_builds_locked_so_a_stale_lockfile_fails_before_the_tag() {
     // The release commit bumps Cargo.toml *and* Cargo.lock, and the only thing
     // that proves they agree is a build with `--locked`. Without the flag cargo
