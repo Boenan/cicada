@@ -6,7 +6,7 @@ members = ["cicada-core", "cicada"]
 version = "0.2.3"
 edition = "2024"
 rust-version = "1.88"   # let-chains; verified by the `msrv` CI job, not asserted
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 repository = "https://github.com/boenan/cicada"
 
 [workspace.dependencies]

@@ -515,4 +515,4 @@ refuses an identifier that sorts *lower* than the current one. Use names that so
 
 ## Licence
 
-MIT OR Apache-2.0.
+cicada uses the [Apache License 2.0](LICENSE).

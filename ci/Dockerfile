@@ -34,5 +34,5 @@ CMD ["cicada"]
 LABEL org.opencontainers.image.title="cicada" \
       org.opencontainers.image.description="Release automation driven by conventional commits — versions, changelogs, tags and releases." \
       org.opencontainers.image.source="https://github.com/boenan/cicada" \
-      org.opencontainers.image.licenses="MIT OR Apache-2.0" \
+      org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}"
