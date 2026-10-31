@@ -1467,10 +1467,11 @@ Token-only, always, for both the API and the git push.
 Inherited from the forges, and prominent in the docs rather than a footnote — because a release PR whose
 CI never runs defeats the entire point of decision #7:
 
-- **GitHub:** `contents: write`, `pull-requests: write`, `issues: write`, plus *Allow GitHub Actions to
-  create and approve pull requests*. The default `GITHUB_TOKEN` **does not trigger workflows on PRs it
-  creates** — a PAT or GitHub App token is required for CI to run on the release PR. On an auto-merging repo
-  this is what makes the loop turn at all, not just a convenience (§No review gate).
+- **GitHub:** `contents: write`, `pull-requests: write`, `issues: write`. The default `GITHUB_TOKEN`
+  **does not trigger workflows on PRs it creates** — a PAT or GitHub App token is required for CI to run on
+  the release PR. On an auto-merging repo this is what makes the loop turn at all, not just a convenience
+  (§No review gate). *Allow GitHub Actions to create and approve pull requests* gates `GITHUB_TOKEN` only,
+  so it is needed only when cicada runs with that token; a PAT is unaffected by it.
 - **GitLab:** Project Access Token, Maintainer role, scopes `api` + `write_repository`. `CI_JOB_TOKEN`
   has the same non-triggering problem for MRs.
 

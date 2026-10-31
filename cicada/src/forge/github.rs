@@ -96,8 +96,9 @@ fn map_error(status: u16, body: &str, repo: &str) -> ForgeError {
         ),
         403 => format!(
             "GitHub refused the request (403 {detail})\n\
-             the token needs `contents: write` and `pull-requests: write` on {repo}, and the repo \
-             needs\n*Allow GitHub Actions to create and approve pull requests* enabled"
+             the token needs `contents: write` and `pull-requests: write` on {repo}\n\
+             if the token is `GITHUB_TOKEN`, the repo also needs\n\
+             *Allow GitHub Actions to create and approve pull requests* enabled (a PAT does not)"
         ),
         404 => format!(
             "GitHub has no {repo}, or this token cannot see it (404)\n\
@@ -266,6 +267,9 @@ mod tests {
         let s = e.to_string();
         assert!(s.contains("pull-requests: write"), "{s}");
         assert!(s.contains("acme/app"), "{s}");
+        // The Actions setting gates `GITHUB_TOKEN` only, so it must not read as
+        // a requirement for every token.
+        assert!(s.contains("if the token is `GITHUB_TOKEN`"), "{s}");
 
         // A private repo answers 404 when the token cannot see it, which sends
         // people hunting for a typo that is not there.

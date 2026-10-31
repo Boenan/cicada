@@ -134,6 +134,26 @@ never run. Thus **the release cycle stops completely**.
 On GitHub, use a **PAT or a GitHub App token**. On GitLab, use a **Project Access Token**. This is a
 requirement, not a convenience.
 
+### PAT permissions
+
+A PAT only has the permissions that you give it when you create it. The `permissions:` block in the
+workflow does not apply to a PAT.
+
+For a **fine-grained PAT**, select only the repository that cicada releases. Give the PAT these
+permissions:
+
+| Permission | Access | cicada uses it to |
+|---|---|---|
+| Contents | Read and write | push the release branch and tags, and create GitHub releases |
+| Pull requests | Read and write | open, update, and close the release PR |
+| Issues | Read and write | add comments and labels to the release PR |
+| Metadata | Read | (GitHub adds this permission automatically) |
+
+For a **classic PAT**, use the `repo` scope. If the repository is public, the `public_repo` scope is
+sufficient.
+
+Store the PAT as a repository secret with the name `CICADA_TOKEN`.
+
 **On GitHub, also set `persist-credentials: false` on `actions/checkout`.** Without this setting, this
 occurs:
 
@@ -169,7 +189,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0             # full history, or the changelog is incomplete
           persist-credentials: false # or GITHUB_TOKEN hijacks cicada's push — see above
@@ -178,7 +198,11 @@ jobs:
           token: ${{ secrets.CICADA_TOKEN }}   # see the footgun above
 ```
 
-You must also enable **Settings → Actions → Allow GitHub Actions to create and approve pull requests**.
+The `permissions:` block only applies to `GITHUB_TOKEN`. For the permissions of a PAT, see
+[PAT permissions](#pat-permissions).
+
+You only need **Settings → Actions → Allow GitHub Actions to create and approve pull requests** if cicada
+uses `GITHUB_TOKEN`. This setting has no effect on a PAT. With a PAT in `CICADA_TOKEN`, you do not need it.
 
 ### GitLab
 
