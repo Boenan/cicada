@@ -2,6 +2,18 @@
 
 <!-- cicada:insert -->
 
+## 0.2.4 (2026-10-31)
+
+### Bug Fixes
+
+* Github actions Pull Request settings (#37) ([61617af](https://github.com/boenan/cicada/commit/61617af2ec334e075d41dcfd6657764d488023b8))
+
+### Documentation
+
+* Update license (#34) ([7067a85](https://github.com/boenan/cicada/commit/7067a85512f0e76d89ea714c27bc616a09db4517))
+
+[Compare with 0.2.3](https://github.com/boenan/cicada/compare/v0.2.3...v0.2.4)
+
 ## 0.2.3 (2026-10-27)
 
 ### Bug Fixes
